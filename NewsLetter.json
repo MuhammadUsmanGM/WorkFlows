@@ -1,0 +1,441 @@
+{
+  "name": "NewsLetter",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        -64
+      ],
+      "id": "b6326341-67bc-48a8-8a51-e31d35e695cb",
+      "name": "Schedule Trigger",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an AI newsletter assistant. Summarize the following AI news articles from the past 24 hours:\n\n{{ JSON.stringify($json[\"articles\"]) }}\n\nCreate a concise, easy-to-read newsletter in HTML format that follows these rules:\n\nBegin with a friendly greeting such as “Hope you’re having a great day” or “Wishing you a productive day” (do not start with “Hello”).\n\nInclude only the top 4–5 most important AI stories (product launches, research breakthroughs, company announcements, regulations, major events).\n\nFor each story:\n\nProvide a clear heading summarizing the topic (use <h3> tags).\n\nKeep the story short, concise, and focused (1–2 sentences for the paragraph plus 2–3 bullet points).\n\nUse bullet points to highlight key details (<ul> and <li>).\n\nEmbed the article link directly in the text (e.g., “read more” as an <a> tag).\n\nOptionally include a relevant image using <img> if available.\n\nUse a friendly, professional tone suitable for newsletter subscribers.\n\nExclude unrelated news (sports, arts, general world events).\n\nKeep the newsletter compact so it fits neatly in an email.\n\nEnd with a short closing line encouraging readers to stay curious about AI.\n\nMake sure the output is well-formatted HTML ready to paste directly into an email client.\n\nExample HTML structure the AI should produce:\n\n<p>Hope you’re having a wonderful day!</p>\n\n<h3>AI Breakthrough in Cardiology</h3>\n<ul>\n  <li>AI system predicts heart attack risk more accurately.</li>\n  <li>Enables personalized treatments based on patient data.</li>\n  <li>Read more <a href=\"URL_HERE\">here</a>.</li>\n</ul>\n\n<h3>Meta Introduces AI Safeguards for Teens</h3>\n<ul>\n  <li>New parental controls for teen-AI interactions.</li>\n  <li>Guardians can manage or disable one-on-one chats.</li>\n  <li>Read more <a href=\"URL_HERE\">here</a>.</li>\n</ul>\n\n<p>Stay curious and keep exploring the world of AI!</p>",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        1344,
+        -160
+      ],
+      "id": "2860e9d8-b184-4340-9aae-4eb92d7998f1",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1360,
+        80
+      ],
+      "id": "b0b4170d-7d54-4d2e-86e1-20a76d1be069",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "xbYLskjDoalq3BHE",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "dailyAInewsletter"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        1488,
+        80
+      ],
+      "id": "473a2389-9357-43c4-bf80-a96449b5de7f",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "url": "https://newsapi.org/v2/everything",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={\n  \"q\": \"artificial intelligence OR AI\",\n  \"language\": \"en\",\n  \"sortBy\": \"publishedAt\",\n  \"pageSize\": \"20\",\n  \"from\": \"{{ $json['yesterdayDate'] }}\",\n  \"apiKey\": \"b918bb11b4e94c07a33e3b7b5953d643\"\n}\n",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "b918bb11b4e94c07a33e3b7b5953d643"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        -160
+      ],
+      "id": "eaeb2061-9f61-4ea6-bd5b-bd4a6188ccd6",
+      "name": "NEWS API"
+    },
+    {
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1920,
+        -160
+      ],
+      "id": "9a82db2e-3509-42c6-b4f6-d314493b1260",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "name": "Replace Me",
+      "typeVersion": 1,
+      "position": [
+        2144,
+        -224
+      ],
+      "id": "18c8e017-2a03-472a-b0cd-d0f525805826"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('SupaBase').item.json.email }}",
+        "subject": "=AI Newsletter - {{$today.toFormat('DD MMM')}}",
+        "message": "=Hi {{ $('SupaBase').item.json.name }},<br></br>\n{{ $('Edit Fields').item.json.summary }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2368,
+        -160
+      ],
+      "id": "281f8158-1e00-4baf-bc5f-785b8aa18d38",
+      "name": "Send a message",
+      "webhookId": "d9ab6316-600d-4080-a4cc-d2ab4e15f433",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "2DcAi9VBc002b2Ou",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6f72250e-c2db-4a56-98cb-6ddec12217a3",
+              "name": "summary",
+              "value": "={{$json[\"output\"]}}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1696,
+        -160
+      ],
+      "id": "6f10aea5-03de-46b0-8877-bb6f4b8aa968",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "url": "https://salfxdxnmavyuqrytcbt.supabase.co/rest/v1/newsletter_subscribers",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "timezone",
+              "value": "=in.({{ $json.timezoneNames.map(tz => '\"' + tz + '\"').join(',') }})\n```\n## If you can't find Expression mode:\n\nJust use the **URL field** instead (much simpler):\n\n**URL:**\n```\nhttps://salfxdxnmavyuqrytcbt.supabase.co/rest/v1/subscribers?timezone=in.({{ $json.timezoneNames.map(tz => '\"' + tz + '\"').join(',') }})"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "{\n  \"apikey\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNhbGZ4ZHhubWF2eXVxcnl0Y2J0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA3MzEzMDYsImV4cCI6MjA3NjMwNzMwNn0.HK255LIfvFGs6R1qT6jtsngb7QPMWgR78sSLvoLWgDs\",\n  \"Authorization\": \"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNhbGZ4ZHhubWF2eXVxcnl0Y2J0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA3MzEzMDYsImV4cCI6MjA3NjMwNzMwNn0.HK255LIfvFGs6R1qT6jtsngb7QPMWgR78sSLvoLWgDs\",\n  \"Content-Type\": \"application/json\"\n}\n",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        672,
+        -64
+      ],
+      "id": "673c910a-7b46-4d9c-a592-c6e198f82b77",
+      "name": "SupaBase"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "34644797-9649-482f-9e1b-77d521384f0c",
+              "leftValue": "={{ $input.all().length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        896,
+        -64
+      ],
+      "id": "f20e0d09-4313-4962-9087-7a9ed9c6196a",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the current UTC date and time\nconst nowUTC = new Date();\n\n// Extract hour and minute in UTC\nconst currentUTCHour = nowUTC.getUTCHours();   // 0–23\nconst currentUTCMinute = nowUTC.getUTCMinutes(); // 0–59\n\n// Also include a timestamp for easier debugging/logging\nconst isoTimestamp = nowUTC.toISOString();\n\n// Return data for the next node\nreturn [{\n  json: {\n    currentUTCHour,\n    currentUTCMinute,\n    isoTimestamp, // optional but useful for logs or DB entries\n    note: \"Current UTC time details for timezone-based 8AM newsletter\"\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        -64
+      ],
+      "id": "de3b9299-9079-4298-bf85-56a6a1fbc525",
+      "name": "Get Timezone"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get current UTC time data from previous node\nconst input = $input.first().json;\nconst currentUTCHour = input.currentUTCHour;\nconst currentUTCMinute = input.currentUTCMinute || 0;\n\n// Timezone offset map\nconst timezoneOffsets = {\n  'Pacific/Midway': -11,\n  'Pacific/Honolulu': -10,\n  'America/Anchorage': -9,\n  'America/Los_Angeles': -8,\n  'America/Denver': -7,\n  'America/Chicago': -6,\n  'America/New_York': -5,\n  'America/Caracas': -4,\n  'America/Sao_Paulo': -3,\n  'Atlantic/South_Georgia': -2,\n  'Atlantic/Azores': -1,\n  'UTC': 0,\n  'Europe/London': 0,\n  'Europe/Paris': 1,\n  'Europe/Berlin': 1,\n  'Europe/Athens': 2,\n  'Europe/Moscow': 3,\n  'Asia/Dubai': 4,\n  'Asia/Karachi': 5,\n  'Asia/Kolkata': 5.5,\n  'Asia/Dhaka': 6,\n  'Asia/Bangkok': 7,\n  'Asia/Singapore': 8,\n  'Asia/Shanghai': 8,\n  'Asia/Tokyo': 9,\n  'Australia/Sydney': 10,\n  'Australia/Brisbane': 10,\n  'Pacific/Noumea': 11,\n  'Pacific/Fiji': 12\n};\n\nconst targetTimezones = [];\n\n// Convert UTC hour + minutes into decimal\nconst utcDecimal = currentUTCHour + currentUTCMinute / 60;\n\n// Loop through all timezones\nfor (const [tz, offset] of Object.entries(timezoneOffsets)) {\n  let localTime = utcDecimal + offset;\n\n  // Wraparound for 0–24\n  if (localTime < 0) localTime += 24;\n  if (localTime >= 24) localTime -= 24;\n\n  // Check if timezone is about to hit 8 AM (7:00–7:59)\n  if (localTime >= 7 && localTime < 8) {\n    targetTimezones.push({\n      timezone: tz,\n      localHour: Math.floor(localTime),\n      localMinute: Math.round((localTime % 1) * 60)\n    });\n  }\n}\n\n// Create flat array of timezone strings for Supabase\n// Keep original casing to match DB exactly\nconst timezoneNames = targetTimezones.map(t => t.timezone);\n\n// Return JSON for next nodes\nreturn [{\n  json: {\n    currentUTCHour,\n    currentUTCMinute,\n    targetTimezones,   // full objects (optional)\n    timezoneNames,     // flat array for Supabase query\n    timezoneCount: targetTimezones.length\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        -64
+      ],
+      "id": "ce442f63-db0b-4105-8be0-70a3d19a86c8",
+      "name": "search Timezone"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    message: \"No subscribers found for this hour. Workflow complete.\",\n    hour: new Date().getUTCHours(),\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        48
+      ],
+      "id": "07d9e313-f629-496a-91f9-688f36b8ee78",
+      "name": "Do Nothing"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Timezone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NEWS API": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Replace Me",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Replace Me": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SupaBase": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "NEWS API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Do Nothing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Timezone": {
+      "main": [
+        [
+          {
+            "node": "search Timezone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "search Timezone": {
+      "main": [
+        [
+          {
+            "node": "SupaBase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "1e3b06b5-104c-4486-bd3b-29960f0806c7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "4793130c2fbb2b1aa4130712783479087f4b14d95a8800a667d048e35bc2ddfb"
+  },
+  "id": "3m5ROSx6pVPVF9Ut",
+  "tags": []
+}

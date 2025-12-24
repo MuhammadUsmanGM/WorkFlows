@@ -1,0 +1,218 @@
+{
+  "name": "LinkedIn AI Post Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 2-4"
+            }
+          ]
+        }
+      },
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [0, 0],
+      "id": "ee7b645d-6808-498a-9980-674c825d94ee",
+      "notes": "Runs Tuesday-Thursday at 9 AM"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract the generated text from HuggingFace Chat Completions\nconst response = items[0].json;\nlet generatedText = \"\";\n\n// HF Router chat completions format:\n// response.choices[0].message.content\nif (response?.choices?.[0]?.message?.content) {\n  generatedText = response.choices[0].message.content;\n}\n\n// Clean up if model echoes anything weird\ngeneratedText = generatedText.trim();\n\n// Ensure hashtags are included\nif (!generatedText.includes('#')) {\n  generatedText += '\\n\\n#ArtificialIntelligence #AI #MachineLearning #Technology #Innovation';\n}\n\n// Image prompt (static or you can enhance later)\nconst imagePrompt = `Professional tech illustration about artificial intelligence and innovation, modern design, blue and purple gradient, clean minimal style, digital art`;\n\nreturn [\n  {\n    json: {\n      postContent: generatedText,\n      imagePrompt,\n      timestamp: new Date().toISOString()\n    }\n  }\n];\n"
+      },
+      "name": "Process Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [448, 0],
+      "id": "99940426-3724-467b-975d-90f4f8eb1ba5"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-base-1.0",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer Your_API_Token"
+            },
+            {
+              "name": "Accept",
+              "value": "image/png"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "inputs",
+              "value": "={{ $json.imagePrompt }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "name": "Generate Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [672, 0],
+      "id": "cd5fe3ca-f568-4562-b5c2-60250770b6cf",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6tH0O5o5pQ9AMneH",
+          "name": "Header Auth account"
+        }
+      },
+      "notes": "Creates AI image with Stable Diffusion"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the image data and post content\nconst imageData = items[0].binary.data;\nconst postContent = $node[\"Process Content\"].json.postContent;\n\nreturn [{\n  json: {\n    postContent: postContent\n  },\n  binary: {\n    data: imageData\n  }\n}];"
+      },
+      "name": "Combine Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [896, 0],
+      "id": "8535bc74-60ee-4ba2-92cf-18f1b7c7fc34"
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.postContent }}",
+        "additionalFields": {}
+      },
+      "name": "Post to LinkedIn",
+      "type": "n8n-nodes-base.linkedIn",
+      "typeVersion": 1,
+      "position": [1120, 0],
+      "id": "112ab100-5960-4f43-a46e-f7d8a7319d4f",
+      "credentials": {
+        "linkedInOAuth2Api": {
+          "id": "v23w3eHUTOsChUQb",
+          "name": "LinkedIn account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://router.huggingface.co/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer Your_API_Token"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"model\": \"meta-llama/Llama-3.1-8B-Instruct\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Write a professional LinkedIn post about an interesting AI trend or development. The post should be 150-200 words, engaging, and include relevant hashtags. Focus on topics like: AI ethics, machine learning breakthroughs, AI in business, generative AI, or AI tools. Make it informative and thought-provoking.\"\n    }\n  ],\n  \"max_tokens\": 300,\n  \"temperature\": 0.7\n}\n",
+        "options": {}
+      },
+      "id": "d4754de2-4099-474e-b3d4-b5085b724f99",
+      "name": "Generate AI Content (HF Router)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [224, 0],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6tH0O5o5pQ9AMneH",
+          "name": "Header Auth account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Generate AI Content (HF Router)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Content": {
+      "main": [
+        [
+          {
+            "node": "Generate Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Image": {
+      "main": [
+        [
+          {
+            "node": "Combine Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine Data": {
+      "main": [
+        [
+          {
+            "node": "Post to LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate AI Content (HF Router)": {
+      "main": [
+        [
+          {
+            "node": "Process Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "b7c269cc-2388-4773-bfad-6a0929b3c2cd",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "4793130c2fbb2b1aa4130712783479087f4b14d95a8800a667d048e35bc2ddfb"
+  },
+  "id": "8iCSTu7ZHfW7DV9f",
+  "tags": []
+}

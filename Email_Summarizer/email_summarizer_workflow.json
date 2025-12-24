@@ -1,0 +1,312 @@
+{
+  "name": "Daily Important Email Summary to WhatsApp",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ],
+      "notesInFlow": true,
+      "notes": "Runs daily at 8 AM"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "simple": false,
+        "format": "simple",
+        "filters": {
+          "query": "is:unread newer_than:1d",
+          "labelIds": [
+            "INBOX"
+          ]
+        },
+        "options": {}
+      },
+      "id": "gmail-node",
+      "name": "Gmail - Get Unread Emails",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail account"
+        }
+      },
+      "notesInFlow": true,
+      "notes": "Fetches unread emails from last 24 hours"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "aggregate-emails",
+      "name": "Aggregate Emails",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        680,
+        300
+      ],
+      "notesInFlow": true,
+      "notes": "Combines all emails into one item"
+    },
+    {
+      "parameters": {
+        "jsCode": "const emails = $input.all();\n\nlet emailText = '';\n\nfor (let i = 0; i < emails.length; i++) {\n  const email = emails[i].json;\n  emailText += `\\n\\nEmail ${i + 1}:\\n`;\n  emailText += `From: ${email.from || 'Unknown'}\\n`;\n  emailText += `Subject: ${email.subject || 'No subject'}\\n`;\n  emailText += `Snippet: ${email.snippet || email.plainText?.substring(0, 200) || 'No content'}\\n`;\n  emailText += `---`;\n}\n\nreturn {\n  json: {\n    emailList: emailText,\n    emailCount: emails.length\n  }\n};"
+      },
+      "id": "format-emails",
+      "name": "Format Emails for AI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ],
+      "notesInFlow": true,
+      "notes": "Formats emails into text for Gemini"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "queryAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "YOUR_GOOGLE_GEMINI_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "bodyParameters": {
+          "parameters": []
+        },
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [{\n    \"parts\": [{\n      \"text\": \"You are an email assistant. Analyze the following emails and identify ONLY the important ones.\\n\\nIMPORTANT emails include:\\n- Client messages (Fiverr, Upwork, direct clients)\\n- Google Classroom announcements\\n- Payment notifications\\n- Project deadlines\\n- Work-related updates\\n- Bills or financial matters\\n- Appointment confirmations\\n\\nUNIMPORTANT emails (IGNORE these):\\n- LinkedIn connection requests\\n- Social media notifications\\n- Marketing/promotional emails\\n- Newsletters\\n- Spam\\n\\nFor each IMPORTANT email, provide:\\n1. Who it's from\\n2. What it's about (1-2 sentences)\\n3. Why it's important\\n\\nIf there are NO important emails, just say 'No important emails today.'\\n\\nEmails:\\n{{ $json.emailList }}\"\n    }]\n  }],\n  \"generationConfig\": {\n    \"temperature\": 0.3,\n    \"maxOutputTokens\": 1000\n  }\n}",
+        "options": {}
+      },
+      "id": "gemini-ai",
+      "name": "Google Gemini AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        300
+      ],
+      "notesInFlow": true,
+      "notes": "Analyzes emails with Gemini API"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst aiText = response.candidates[0].content.parts[0].text;\n\nreturn {\n  json: {\n    summary: aiText,\n    hasImportantEmails: !aiText.toLowerCase().includes('no important emails')\n  }\n};"
+      },
+      "id": "extract-response",
+      "name": "Extract AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        300
+      ],
+      "notesInFlow": true,
+      "notes": "Extracts the AI summary"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.hasImportantEmails }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-important",
+      "name": "Has Important Emails?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        300
+      ],
+      "notesInFlow": true,
+      "notes": "Only send if there are important emails"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.callmebot.com/whatsapp.php",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "phone",
+              "value": "YOUR_PHONE_NUMBER_WITH_COUNTRY_CODE"
+            },
+            {
+              "name": "text",
+              "value": "=📧 *Important Emails Summary*\\n\\n{{ $('Extract AI Response').item.json.summary }}"
+            },
+            {
+              "name": "apikey",
+              "value": "YOUR_CALLMEBOT_API_KEY"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "whatsapp-send",
+      "name": "Send to WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1780,
+        200
+      ],
+      "notesInFlow": true,
+      "notes": "Sends summary via CallMeBot WhatsApp API"
+    },
+    {
+      "parameters": {},
+      "id": "no-action",
+      "name": "No Important Emails",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1780,
+        400
+      ],
+      "notesInFlow": true,
+      "notes": "No action needed if no important emails"
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Gmail - Get Unread Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail - Get Unread Emails": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Emails": {
+      "main": [
+        [
+          {
+            "node": "Format Emails for AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Emails for AI": {
+      "main": [
+        [
+          {
+            "node": "Google Gemini AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini AI": {
+      "main": [
+        [
+          {
+            "node": "Extract AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract AI Response": {
+      "main": [
+        [
+          {
+            "node": "Has Important Emails?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Important Emails?": {
+      "main": [
+        [
+          {
+            "node": "Send to WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Important Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2024-12-24T00:00:00.000Z",
+  "versionId": "1"
+}
