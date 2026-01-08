@@ -1,0 +1,531 @@
+{
+  "name": "LinkedIn Lead Generation Machine",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "daily-lead-gen"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.prospeo.io/linkedin-email-finder",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "url",
+              "value": "={{ $json.linkedin_url }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "email-finder",
+      "name": "Find Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        660,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "prospeo-api-key",
+          "name": "Prospeo API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.apollo.io/v1/people/match",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "first_name",
+              "value": "={{ $json.first_name }}"
+            },
+            {
+              "name": "last_name",
+              "value": "={{ $json.last_name }}"
+            },
+            {
+              "name": "organization_name",
+              "value": "={{ $json.company }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "enrich-data",
+      "name": "Enrich Lead Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        880,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "apollo-api-key",
+          "name": "Apollo API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Lead Scoring Algorithm\nconst items = $input.all();\nconst scoredLeads = [];\n\nfor (const item of items) {\n  let score = 0;\n  const data = item.json;\n  \n  // Job Title Scoring\n  const seniorTitles = ['CEO', 'CTO', 'VP', 'Director', 'Head of', 'Chief'];\n  const title = data.title || '';\n  if (seniorTitles.some(t => title.includes(t))) {\n    score += 30;\n  } else if (title.includes('Manager')) {\n    score += 20;\n  } else {\n    score += 10;\n  }\n  \n  // Company Size Scoring\n  const companySize = data.company_size || 0;\n  if (companySize >= 200) {\n    score += 25;\n  } else if (companySize >= 50) {\n    score += 15;\n  } else if (companySize >= 10) {\n    score += 10;\n  }\n  \n  // Industry Relevance (customize based on your ICP)\n  const targetIndustries = ['SaaS', 'Technology', 'Software', 'E-commerce'];\n  const industry = data.industry || '';\n  if (targetIndustries.some(i => industry.includes(i))) {\n    score += 20;\n  }\n  \n  // Email Validity\n  if (data.email && data.email_status === 'valid') {\n    score += 15;\n  }\n  \n  // Recent Activity/Engagement\n  if (data.recent_activity === true) {\n    score += 10;\n  }\n  \n  // Assign Priority\n  let priority = 'Low';\n  if (score >= 70) {\n    priority = 'Hot';\n  } else if (score >= 50) {\n    priority = 'Warm';\n  } else if (score >= 30) {\n    priority = 'Medium';\n  }\n  \n  scoredLeads.push({\n    json: {\n      ...data,\n      lead_score: score,\n      priority: priority,\n      scored_at: new Date().toISOString()\n    }\n  });\n}\n\nreturn scoredLeads;"
+      },
+      "id": "lead-scoring",
+      "name": "AI Lead Scoring",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "hot-leads",
+              "leftValue": "={{ $json.priority }}",
+              "rightValue": "Hot",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-hot-leads",
+      "name": "Filter Hot Leads",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "model": "claude-sonnet-4-20250514",
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 500
+        },
+        "text": "=Write a personalized cold outreach message for LinkedIn to:\n\nName: {{ $json.first_name }} {{ $json.last_name }}\nTitle: {{ $json.title }}\nCompany: {{ $json.company }}\nIndustry: {{ $json.industry }}\n\nOur value proposition: [CUSTOMIZE: We help B2B companies automate their lead generation and increase qualified meetings by 300%]\n\nRequirements:\n- Keep it under 150 words\n- Personalize based on their role and company\n- Include a soft CTA (ask a question, not pushy)\n- Professional but conversational tone\n- NO generic templates\n- Reference something specific about their industry or role\n\nFormat: Just the message body, no subject line."
+      },
+      "id": "ai-personalization",
+      "name": "AI Message Personalization",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        220
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "anthropic-api",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "YOUR_AIRTABLE_BASE_ID",
+          "mode": "list",
+          "cachedResultName": "Lead Database"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "list",
+          "cachedResultName": "Leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "first_name": "={{ $json.first_name }}",
+            "last_name": "={{ $json.last_name }}",
+            "email": "={{ $json.email }}",
+            "company": "={{ $json.company }}",
+            "title": "={{ $json.title }}",
+            "linkedin_url": "={{ $json.linkedin_url }}",
+            "lead_score": "={{ $json.lead_score }}",
+            "priority": "={{ $json.priority }}",
+            "personalized_message": "={{ $json.ai_message }}",
+            "status": "Ready to Contact",
+            "date_added": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "save-to-crm",
+      "name": "Save to CRM (Airtable)",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        220
+      ],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "airtable-api",
+          "name": "Airtable API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "YOUR_SLACK_CHANNEL",
+        "text": "=🔥 *New Hot Lead Alert!*\n\n*Name:* {{ $json.first_name }} {{ $json.last_name }}\n*Title:* {{ $json.title }}\n*Company:* {{ $json.company }}\n*Lead Score:* {{ $json.lead_score }}/100\n*Priority:* {{ $json.priority }}\n\n*LinkedIn:* {{ $json.linkedin_url }}\n*Email:* {{ $json.email }}\n\n*AI Personalized Message Ready:*\n```{{ $json.ai_message }}```\n\n✅ Lead saved to CRM - Ready for outreach!",
+        "otherOptions": {}
+      },
+      "id": "slack-notification",
+      "name": "Notify Team (Slack)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1980,
+        220
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "slack-api",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "YOUR_AIRTABLE_BASE_ID",
+          "mode": "list",
+          "cachedResultName": "Lead Database"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "list",
+          "cachedResultName": "Leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "first_name": "={{ $json.first_name }}",
+            "last_name": "={{ $json.last_name }}",
+            "email": "={{ $json.email }}",
+            "company": "={{ $json.company }}",
+            "title": "={{ $json.title }}",
+            "linkedin_url": "={{ $json.linkedin_url }}",
+            "lead_score": "={{ $json.lead_score }}",
+            "priority": "={{ $json.priority }}",
+            "status": "Nurture",
+            "date_added": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "save-warm-leads",
+      "name": "Save Warm/Medium Leads",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        380
+      ],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "airtable-api",
+          "name": "Airtable API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## LinkedIn Lead Gen Workflow\n\n**This workflow:**\n1. Scrapes LinkedIn profiles (input via webhook or manual)\n2. Finds verified emails\n3. Enriches with company data\n4. Scores leads with AI algorithm\n5. Generates personalized outreach messages\n6. Saves to CRM/Airtable\n7. Notifies your team on hot leads\n\n**💰 Value:** \n- Saves 20+ hours/week on manual prospecting\n- 3x higher response rates with AI personalization\n- No more cold, generic outreach\n\n**Setup Required:**\n- API keys (see SETUP.md)\n- Airtable base\n- Customize scoring logic\n- Add your value proposition",
+        "height": 340,
+        "width": 380
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "linkedin-lead",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook (Manual Lead Input)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        160
+      ],
+      "webhookId": "manual-lead-input"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  \"success\": true,\n  \"message\": \"Lead processed successfully\",\n  \"lead_score\": $json.lead_score,\n  \"priority\": $json.priority,\n  \"email_found\": $json.email ? true : false\n} }}"
+      },
+      "id": "webhook-response",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2200,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "merge-data",
+              "name": "linkedin_url",
+              "value": "={{ $json.url || $json.linkedin_url }}",
+              "type": "string"
+            },
+            {
+              "id": "parse-name",
+              "name": "first_name",
+              "value": "={{ $json.first_name || $json.name?.split(' ')[0] }}",
+              "type": "string"
+            },
+            {
+              "id": "parse-lastname",
+              "name": "last_name",
+              "value": "={{ $json.last_name || $json.name?.split(' ').slice(1).join(' ') }}",
+              "type": "string"
+            },
+            {
+              "id": "company-name",
+              "name": "company",
+              "value": "={{ $json.company }}",
+              "type": "string"
+            },
+            {
+              "id": "job-title",
+              "name": "title",
+              "value": "={{ $json.title || $json.job_title }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "data-preparation",
+      "name": "Prepare Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [
+        460,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook (Manual Lead Input)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Data": {
+      "main": [
+        [
+          {
+            "node": "Find Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Email": {
+      "main": [
+        [
+          {
+            "node": "Enrich Lead Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrich Lead Data": {
+      "main": [
+        [
+          {
+            "node": "AI Lead Scoring",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Lead Scoring": {
+      "main": [
+        [
+          {
+            "node": "Filter Hot Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Hot Leads": {
+      "main": [
+        [
+          {
+            "node": "AI Message Personalization",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save Warm/Medium Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Message Personalization": {
+      "main": [
+        [
+          {
+            "node": "Save to CRM (Airtable)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to CRM (Airtable)": {
+      "main": [
+        [
+          {
+            "node": "Notify Team (Slack)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Team (Slack)": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2025-01-08T00:00:00.000Z",
+      "updatedAt": "2025-01-08T00:00:00.000Z",
+      "id": "lead-generation",
+      "name": "Lead Generation"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-08T00:00:00.000Z",
+  "versionId": "1.0.0"
+}

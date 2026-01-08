@@ -1,0 +1,1218 @@
+{
+  "name": "Full-Stack Project Monitor with AI Code Review",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "e9579410-8fa5-4d9c-b877-fd565aaf69b7",
+      "name": "Schedule Every 30 Min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -688,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "github-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "75776ab8-8bc0-4bf7-9048-83e85aa6f964",
+      "name": "GitHub Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [
+        -688,
+        160
+      ],
+      "webhookId": "98e129e9-b000-4f1a-8534-f6b251d3ac61"
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/repos/YOUR_USERNAME/YOUR_REPO/events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GITHUB_TOKEN"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0792de47-0bd8-4180-888d-37f7cb4fabf7",
+      "name": "Fetch GitHub Events",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -464,
+        -48
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6tH0O5o5pQ9AMneH",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "multiplex",
+        "options": {}
+      },
+      "id": "874aa8cc-1eb7-4197-9d6a-ff90bd1e3617",
+      "name": "Merge All Triggers",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [
+        -256,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      },
+      "id": "0b5566d3-faa0-4274-89e9-5176c9037c53",
+      "name": "Split Into Batches (5)",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -32,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/repos/YOUR_USERNAME/YOUR_REPO/pulls",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GITHUB_TOKEN"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github.diff"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b7393f93-6f3b-4507-b32d-4b945f4e43ad",
+      "name": "Get PR Diff",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        208,
+        -64
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6tH0O5o5pQ9AMneH",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse and extract code changes\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const diff = item.json.body || '';\n  const lines = diff.split('\\n');\n  \n  const codeChanges = {\n    additions: lines.filter(l => l.startsWith('+')).length,\n    deletions: lines.filter(l => l.startsWith('-')).length,\n    files: (diff.match(/diff --git/g) || []).length,\n    diffContent: diff.substring(0, 2000) // First 2000 chars\n  };\n  \n  results.push({ json: { ...item.json, codeChanges } });\n}\n\nreturn results;"
+      },
+      "id": "fde0c228-5f9d-4b06-b696-57d4a2b3a6d6",
+      "name": "Parse Code Changes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GROQ_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"model\": \"llama-3.1-8b-instant\", \"messages\": [{\"role\": \"system\", \"content\": \"You are a senior code reviewer. Analyze code quality, identify issues, and provide ratings (1-10).\"}, {\"role\": \"user\", \"content\": \"Analyze this code diff: \" + $json.codeChanges.diffContent + \". Provide: 1) Quality score (1-10), 2) Issues found, 3) Improvements needed. Format as JSON.\"}], \"temperature\": 0.3, \"max_tokens\": 500} }}",
+        "options": {}
+      },
+      "id": "33fe85f1-cb84-4110-afcd-17eb8296b6de",
+      "name": "AI Code Quality Analysis (Groq)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        656,
+        -64
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6tH0O5o5pQ9AMneH",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GROQ_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"model\": \"llama-3.1-8b-instant\", \"messages\": [{\"role\": \"system\", \"content\": \"You are a code improvement expert. Suggest specific improvements.\"}, {\"role\": \"user\", \"content\": \"Code diff: \" + $json.codeChanges.diffContent + \". Suggest 3-5 specific improvements with examples.\"}], \"temperature\": 0.4, \"max_tokens\": 600} }}",
+        "options": {}
+      },
+      "id": "79d43c2d-7a93-4aa3-94d5-e5587473227c",
+      "name": "AI Improvement Suggestions (Groq)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        880,
+        -64
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6tH0O5o5pQ9AMneH",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GROQ_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"model\": \"llama-3.1-8b-instant\", \"messages\": [{\"role\": \"system\", \"content\": \"You are a security expert. Identify security vulnerabilities in code.\"}, {\"role\": \"user\", \"content\": \"Check for security issues: \" + $json.codeChanges.diffContent + \". List vulnerabilities with severity (low/medium/high).\"}], \"temperature\": 0.2, \"max_tokens\": 400} }}",
+        "options": {}
+      },
+      "id": "20d39883-237a-43b7-ac90-87486ded18cc",
+      "name": "Security Vulnerability Check (Groq)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1088,
+        -64
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6tH0O5o5pQ9AMneH",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.choices[0].message.content }}",
+              "operation": "contains",
+              "value2": "high"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "101ac724-1c06-4634-b6a5-09eb7a6d5043",
+      "name": "Check Critical Issues",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1312,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "CodeAnalysis",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "be83c26f-ab8b-4429-b968-a6f201caf137",
+      "name": "Log Analysis to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.2,
+      "position": [
+        1536,
+        -64
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "mYwMq60q4ZAd6Bhi",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/repos/YOUR_USERNAME/YOUR_REPO/issues",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GITHUB_TOKEN"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "23cba560-1f67-4b58-a0d2-078871043fa1",
+      "name": "Fetch New Issues",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -32,
+        256
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6tH0O5o5pQ9AMneH",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GROQ_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"model\": \"llama-3.1-8b-instant\", \"messages\": [{\"role\": \"system\", \"content\": \"Categorize GitHub issues as: bug, feature, question, or documentation.\"}, {\"role\": \"user\", \"content\": \"Title: \" + $json.title + \". Body: \" + $json.body + \". Category?\"}], \"temperature\": 0.1, \"max_tokens\": 50} }}",
+        "options": {}
+      },
+      "id": "5175d832-abe9-40ff-87a3-261a2e15aaed",
+      "name": "AI Categorize Issues (Groq)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        192,
+        256
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6tH0O5o5pQ9AMneH",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GROQ_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"model\": \"llama-3.1-8b-instant\", \"messages\": [{\"role\": \"system\", \"content\": \"Assign priority (P0-critical, P1-high, P2-medium, P3-low) to GitHub issues.\"}, {\"role\": \"user\", \"content\": \"Issue: \" + $json.title + \". Category: \" + $json.category + \". Priority?\"}], \"temperature\": 0.1, \"max_tokens\": 30} }}",
+        "options": {}
+      },
+      "id": "6cacafc8-544e-480c-895d-19cef626ad9c",
+      "name": "AI Assign Priority (Groq)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        416,
+        256
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6tH0O5o5pQ9AMneH",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract labels and assignees\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const labels = item.json.labels?.map(l => l.name) || [];\n  const assignees = item.json.assignees?.map(a => a.login) || [];\n  \n  results.push({\n    json: {\n      ...item.json,\n      labelsList: labels.join(', '),\n      assigneesList: assignees.join(', '),\n      isAssigned: assignees.length > 0\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "37ed5a31-42ba-48d5-b8fc-d980dd195132",
+      "name": "Extract Issue Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.priority }}",
+              "operation": "contains",
+              "value2": "P0"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5010c2ed-98d8-47b2-8030-1147d8bcb4bc",
+      "name": "Check If Critical",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        864,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://YOUR_SLACK_WEBHOOK_URL",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"text\": \"🚨 Critical Issue Alert: \" + $json.title + \" - Priority: \" + $json.priority + \" - Category: \" + $json.category} }}",
+        "options": {}
+      },
+      "id": "971dc1c5-58f7-421f-966b-adeed3b66371",
+      "name": "Alert Team (Slack)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1072,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/repos/YOUR_USERNAME/YOUR_REPO/readme",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GITHUB_TOKEN"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "54a33b9b-c13c-4fb7-aa29-ad9754c9924d",
+      "name": "Get README",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -32,
+        560
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6tH0O5o5pQ9AMneH",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GROQ_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"model\": \"llama-3.1-8b-instant\", \"messages\": [{\"role\": \"system\", \"content\": \"Analyze documentation and identify missing sections (Installation, Usage, API, Contributing, etc.).\"}, {\"role\": \"user\", \"content\": \"README content: \" + $json.content + \". What's missing?\"}], \"temperature\": 0.3, \"max_tokens\": 300} }}",
+        "options": {}
+      },
+      "id": "18b85f22-9587-4fcb-87be-032d9830ed60",
+      "name": "Analyze Doc Gaps (Groq)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        192,
+        560
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6tH0O5o5pQ9AMneH",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GROQ_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"model\": \"llama-3.1-8b-instant\", \"messages\": [{\"role\": \"system\", \"content\": \"Generate documentation sections in Markdown format.\"}, {\"role\": \"user\", \"content\": \"Generate: \" + $json.missingSection + \" section for this project. Make it comprehensive and professional.\"}], \"temperature\": 0.5, \"max_tokens\": 800} }}",
+        "options": {}
+      },
+      "id": "86c35b91-cdb0-4ca0-88fc-ddbb984676b6",
+      "name": "Generate Missing Sections (Groq)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        416,
+        560
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6tH0O5o5pQ9AMneH",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format documentation as Markdown\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const content = item.json.choices[0].message.content;\n  const formatted = `# Generated Documentation\\n\\n${content}\\n\\n---\\n*Auto-generated by AI on ${new Date().toISOString()}*`;\n  \n  results.push({\n    json: {\n      ...item.json,\n      formattedDocs: formatted\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "0c24f28c-6518-4f43-982c-0dafa4f7282b",
+      "name": "Format Markdown",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "title": "={{ \"Project Docs - \" + $now.format('yyyy-MM-dd') }}"
+      },
+      "id": "17df18ac-a7cc-4051-bd86-0fc0e2535ea0",
+      "name": "Create Google Doc",
+      "type": "n8n-nodes-base.googleDocs",
+      "typeVersion": 1,
+      "position": [
+        864,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "pageId": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "title": "={{ \"Changelog - \" + $now.format('yyyy-MM-dd') }}",
+        "options": {}
+      },
+      "id": "73f1b05c-9924-41d6-b7e0-efdbfe833dd1",
+      "name": "Update Notion Wiki",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.1,
+      "position": [
+        1072,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.github.com/repos/YOUR_USERNAME/YOUR_REPO/pulls",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GITHUB_TOKEN"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"title\": \"docs: Update documentation\", \"body\": \"Auto-generated documentation updates\", \"head\": \"docs-update\", \"base\": \"main\"} }}",
+        "options": {}
+      },
+      "id": "fa04d8ec-e1df-4600-aaec-5e315bf4f2d9",
+      "name": "Create Documentation PR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1296,
+        560
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6tH0O5o5pQ9AMneH",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Aggregate weekly metrics\nconst items = $input.all();\n\nconst metrics = {\n  totalPRs: items.filter(i => i.json.type === 'pr').length,\n  totalIssues: items.filter(i => i.json.type === 'issue').length,\n  criticalIssues: items.filter(i => i.json.priority === 'P0').length,\n  avgQualityScore: 0,\n  securityVulns: 0\n};\n\nreturn [{json: metrics}];"
+      },
+      "id": "332448c0-015c-4b85-adf9-e44d89e88a2a",
+      "name": "Aggregate Weekly Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -32,
+        864
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_GROQ_API_KEY"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"model\": \"llama-3.1-8b-instant\", \"messages\": [{\"role\": \"system\", \"content\": \"Generate executive summary for project metrics.\"}, {\"role\": \"user\", \"content\": \"Metrics: \" + JSON.stringify($json) + \". Create professional summary.\"}], \"temperature\": 0.4, \"max_tokens\": 500} }}",
+        "options": {}
+      },
+      "id": "f7648619-d59b-4cff-8f4b-abba000be379",
+      "name": "Generate Executive Summary (Groq)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        192,
+        864
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6tH0O5o5pQ9AMneH",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Create chart data for visualization\nconst data = $input.first().json;\n\nconst chartData = {\n  labels: ['PRs', 'Issues', 'Critical', 'Quality'],\n  values: [data.totalPRs, data.totalIssues, data.criticalIssues, data.avgQualityScore]\n};\n\nreturn [{json: chartData}];"
+      },
+      "id": "0685ab16-1133-4066-8379-c59f2da2e627",
+      "name": "Prepare Chart Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        864
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Dashboard",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "d9c37940-ae94-491b-a225-b0fba2a3a8c4",
+      "name": "Update Metrics Dashboard (Sheets)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.2,
+      "position": [
+        640,
+        864
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "mYwMq60q4ZAd6Bhi",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "YOUR_EMAIL@gmail.com",
+        "subject": "={{ \"Weekly Project Report - \" + $now.format('yyyy-MM-dd') }}",
+        "message": "={{ $json.executiveSummary }}",
+        "options": {}
+      },
+      "id": "1db7bca1-d3a6-4f95-9f1f-8379f2380038",
+      "name": "Send Email Report (Gmail)",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        864,
+        864
+      ],
+      "webhookId": "35aeff45-43d1-45f8-a59a-b1507f812373",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "2DcAi9VBc002b2Ou",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://YOUR_DISCORD_WEBHOOK_URL",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\"content\": \"📊 Weekly Team Update:\\n\" + $json.executiveSummary} }}",
+        "options": {}
+      },
+      "id": "1f2b9463-44ca-4193-9334-ef5559bac50a",
+      "name": "Team Update (Discord)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1072,
+        864
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ \"🚀 Project Report\\n\\n\" + $json.executiveSummary }}",
+        "additionalFields": {}
+      },
+      "id": "2e3f6f16-e473-4547-80e7-f590f5aa926e",
+      "name": "Mobile Notification (Telegram)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1296,
+        864
+      ],
+      "webhookId": "792c30be-5bac-402b-bcbe-4343bc236271",
+      "credentials": {
+        "telegramApi": {
+          "id": "xBqGDH0FTAPPeW3v",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Every 30 Min": {
+      "main": [
+        [
+          {
+            "node": "Fetch GitHub Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GitHub Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Merge All Triggers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch GitHub Events": {
+      "main": [
+        [
+          {
+            "node": "Merge All Triggers",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge All Triggers": {
+      "main": [
+        [
+          {
+            "node": "Split Into Batches (5)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch New Issues",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get README",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Into Batches (5)": {
+      "main": [
+        [
+          {
+            "node": "Get PR Diff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get PR Diff": {
+      "main": [
+        [
+          {
+            "node": "Parse Code Changes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Code Changes": {
+      "main": [
+        [
+          {
+            "node": "AI Code Quality Analysis (Groq)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Code Quality Analysis (Groq)": {
+      "main": [
+        [
+          {
+            "node": "AI Improvement Suggestions (Groq)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Improvement Suggestions (Groq)": {
+      "main": [
+        [
+          {
+            "node": "Security Vulnerability Check (Groq)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Security Vulnerability Check (Groq)": {
+      "main": [
+        [
+          {
+            "node": "Check Critical Issues",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Critical Issues": {
+      "main": [
+        [
+          {
+            "node": "Log Analysis to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Analysis to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch New Issues": {
+      "main": [
+        [
+          {
+            "node": "AI Categorize Issues (Groq)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Categorize Issues (Groq)": {
+      "main": [
+        [
+          {
+            "node": "AI Assign Priority (Groq)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Assign Priority (Groq)": {
+      "main": [
+        [
+          {
+            "node": "Extract Issue Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Issue Metadata": {
+      "main": [
+        [
+          {
+            "node": "Check If Critical",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check If Critical": {
+      "main": [
+        [
+          {
+            "node": "Alert Team (Slack)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get README": {
+      "main": [
+        [
+          {
+            "node": "Analyze Doc Gaps (Groq)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Doc Gaps (Groq)": {
+      "main": [
+        [
+          {
+            "node": "Generate Missing Sections (Groq)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Missing Sections (Groq)": {
+      "main": [
+        [
+          {
+            "node": "Format Markdown",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Markdown": {
+      "main": [
+        [
+          {
+            "node": "Create Google Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Google Doc": {
+      "main": [
+        [
+          {
+            "node": "Update Notion Wiki",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Notion Wiki": {
+      "main": [
+        [
+          {
+            "node": "Create Documentation PR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Analysis to Sheets": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Weekly Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Weekly Metrics": {
+      "main": [
+        [
+          {
+            "node": "Generate Executive Summary (Groq)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Executive Summary (Groq)": {
+      "main": [
+        [
+          {
+            "node": "Prepare Chart Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Chart Data": {
+      "main": [
+        [
+          {
+            "node": "Update Metrics Dashboard (Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Metrics Dashboard (Sheets)": {
+      "main": [
+        [
+          {
+            "node": "Send Email Report (Gmail)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email Report (Gmail)": {
+      "main": [
+        [
+          {
+            "node": "Team Update (Discord)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Team Update (Discord)": {
+      "main": [
+        [
+          {
+            "node": "Mobile Notification (Telegram)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "817f9cb2-4761-48f2-834d-497d16fd6ba2",
+  "meta": {
+    "instanceId": "4793130c2fbb2b1aa4130712783479087f4b14d95a8800a667d048e35bc2ddfb"
+  },
+  "id": "GXQ3kGwx8ms1UWFc",
+  "tags": [
+    {
+      "updatedAt": "2025-11-16T13:13:36.284Z",
+      "createdAt": "2025-11-16T13:13:36.284Z",
+      "id": "eXOczh5b7IubTOOy",
+      "name": "Code Review"
+    },
+    {
+      "updatedAt": "2025-11-16T13:13:36.276Z",
+      "createdAt": "2025-11-16T13:13:36.276Z",
+      "id": "fPT36uDksO2skUCo",
+      "name": "AI"
+    },
+    {
+      "updatedAt": "2025-11-16T13:13:36.229Z",
+      "createdAt": "2025-11-16T13:13:36.229Z",
+      "id": "tjc9IRZKqktTRe8a",
+      "name": "GitHub"
+    }
+  ]
+}
