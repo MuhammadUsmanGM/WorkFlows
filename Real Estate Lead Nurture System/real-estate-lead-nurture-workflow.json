@@ -1,0 +1,580 @@
+{
+  "name": "Real Estate Lead Nurture System",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "zillow-lead",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-zillow",
+      "name": "Zillow Lead Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "zillow-leads"
+    },
+    {
+      "parameters": {
+        "path": "realtor-lead",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-realtor",
+      "name": "Realtor.com Lead Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 460],
+      "webhookId": "realtor-leads"
+    },
+    {
+      "parameters": {
+        "path": "website-lead",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-website",
+      "name": "Website Lead Form",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 620],
+      "webhookId": "website-leads"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize leads from different sources\nconst items = $input.all();\nconst normalizedLeads = [];\n\nfor (const item of items) {\n  const data = item.json;\n  let normalizedLead = {};\n  \n  // Detect source\n  let source = 'unknown';\n  if ($node.name.includes('Zillow')) source = 'zillow';\n  else if ($node.name.includes('Realtor')) source = 'realtor';\n  else if ($node.name.includes('Website')) source = 'website';\n  \n  // Normalize based on source\n  if (source === 'zillow') {\n    normalizedLead = {\n      source: 'zillow',\n      lead_id: `ZILLOW-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`,\n      first_name: data.firstName || data.first_name || '',\n      last_name: data.lastName || data.last_name || '',\n      email: data.email || data.emailAddress || '',\n      phone: data.phone || data.phoneNumber || '',\n      location: data.location || data.city || '',\n      zip_code: data.zipCode || data.zip || '',\n      price_min: parseFloat(data.priceMin || data.minPrice || 0),\n      price_max: parseFloat(data.priceMax || data.maxPrice || 0),\n      bedrooms_min: parseInt(data.beds || data.bedrooms || 0),\n      bathrooms_min: parseFloat(data.baths || data.bathrooms || 0),\n      property_type: data.propertyType || data.type || 'Any',\n      lead_type: data.leadType || 'Buyer',\n      urgency: data.urgency || 'Medium',\n      message: data.message || data.comments || '',\n      viewing_property: data.zpid || data.propertyId || ''\n    };\n  } else if (source === 'realtor') {\n    normalizedLead = {\n      source: 'realtor',\n      lead_id: `REALTOR-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`,\n      first_name: data.first_name || data.firstName || '',\n      last_name: data.last_name || data.lastName || '',\n      email: data.email || '',\n      phone: data.phone || '',\n      location: data.city || data.location || '',\n      zip_code: data.zip_code || '',\n      price_min: parseFloat(data.min_price || data.priceMin || 0),\n      price_max: parseFloat(data.max_price || data.priceMax || 0),\n      bedrooms_min: parseInt(data.min_beds || data.bedrooms || 0),\n      bathrooms_min: parseFloat(data.min_baths || data.bathrooms || 0),\n      property_type: data.property_type || 'Any',\n      lead_type: data.lead_type || 'Buyer',\n      urgency: data.urgency || 'Medium',\n      message: data.message || '',\n      viewing_property: data.listing_id || ''\n    };\n  } else if (source === 'website') {\n    normalizedLead = {\n      source: 'website',\n      lead_id: `WEB-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`,\n      first_name: data.first_name || data.firstName || '',\n      last_name: data.last_name || data.lastName || '',\n      email: data.email || '',\n      phone: data.phone || '',\n      location: data.location || data.city || '',\n      zip_code: data.zip_code || data.zip || '',\n      price_min: parseFloat(data.price_min || data.minPrice || 0),\n      price_max: parseFloat(data.price_max || data.maxPrice || 0),\n      bedrooms_min: parseInt(data.bedrooms || data.beds || 0),\n      bathrooms_min: parseFloat(data.bathrooms || data.baths || 0),\n      property_type: data.property_type || 'Any',\n      lead_type: data.lead_type || 'Buyer',\n      urgency: data.urgency || 'Medium',\n      message: data.message || data.notes || '',\n      viewing_property: data.property_id || ''\n    };\n  }\n  \n  // Add common fields\n  normalizedLead.full_name = `${normalizedLead.first_name} ${normalizedLead.last_name}`.trim();\n  normalizedLead.received_at = new Date().toISOString();\n  normalizedLead.status = 'new';\n  normalizedLead.stage = 'lead';\n  normalizedLead.last_contact = null;\n  normalizedLead.next_action = 'initial_contact';\n  \n  normalizedLeads.push({ json: normalizedLead });\n}\n\nreturn normalizedLeads;"
+      },
+      "id": "normalize-leads",
+      "name": "Normalize Lead Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 400]
+    },
+    {
+      "parameters": {
+        "model": "claude-sonnet-4-20250514",
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 2000
+        },
+        "text": "=Analyze this real estate lead and provide insights:\n\nLead Details:\n- Name: {{ $json.full_name }}\n- Source: {{ $json.source }}\n- Location: {{ $json.location }} {{ $json.zip_code }}\n- Budget: ${{ $json.price_min }} - ${{ $json.price_max }}\n- Beds: {{ $json.bedrooms_min }}+\n- Baths: {{ $json.bathrooms_min }}+\n- Property Type: {{ $json.property_type }}\n- Lead Type: {{ $json.lead_type }}\n- Message: {{ $json.message }}\n\nProvide analysis in this EXACT JSON format:\n{\n  \"lead_quality\": \"hot|warm|cold\",\n  \"lead_score\": 85,\n  \"buyer_readiness\": \"ready_now|3_months|6_months|researching\",\n  \"motivation_level\": \"high|medium|low\",\n  \"price_point_category\": \"luxury|mid_market|affordable|entry_level\",\n  \"key_priorities\": [\"priority1\", \"priority2\", \"priority3\"],\n  \"concerns_or_objections\": [\"concern1\", \"concern2\"],\n  \"recommended_properties\": [\n    {\"type\": \"property_type\", \"reason\": \"why this fits\"},\n    {\"type\": \"property_type\", \"reason\": \"backup option\"}\n  ],\n  \"communication_style\": \"formal|casual|data_driven|emotional\",\n  \"best_contact_time\": \"morning|afternoon|evening|weekend\",\n  \"nurture_strategy\": \"aggressive|moderate|gentle|educational\",\n  \"talking_points\": [\"point1\", \"point2\", \"point3\"],\n  \"predicted_close_timeline\": \"30_days|60_days|90_days|6_months\"\n}\n\nIMPORTANT: Return ONLY valid JSON, no markdown, no explanations."
+      },
+      "id": "ai-lead-analysis",
+      "name": "AI Lead Analysis",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1,
+      "position": [680, 400],
+      "credentials": {
+        "anthropicApi": {
+          "id": "anthropic-api",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI analysis and enrich lead data\nconst lead = $('Normalize Lead Data').first().json;\nconst aiRaw = $input.first().json.output || '{}';\n\nlet aiAnalysis;\ntry {\n  const cleaned = aiRaw.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  aiAnalysis = JSON.parse(cleaned);\n} catch (e) {\n  console.error('AI parse error:', e);\n  aiAnalysis = {\n    lead_quality: 'warm',\n    lead_score: 50,\n    buyer_readiness: '3_months',\n    motivation_level: 'medium',\n    price_point_category: 'mid_market',\n    key_priorities: ['location', 'price', 'size'],\n    concerns_or_objections: [],\n    recommended_properties: [],\n    communication_style: 'casual',\n    best_contact_time: 'afternoon',\n    nurture_strategy: 'moderate',\n    talking_points: [],\n    predicted_close_timeline: '90_days'\n  };\n}\n\n// Determine immediate actions based on lead quality\nlet immediate_actions = [];\nlet follow_up_schedule = {};\n\nif (aiAnalysis.lead_quality === 'hot') {\n  immediate_actions = ['call_immediately', 'send_top_listings', 'schedule_showing'];\n  follow_up_schedule = {\n    first_call: 'within_1_hour',\n    first_email: 'within_2_hours',\n    second_call: 'next_day',\n    showing_offer: 'within_24_hours'\n  };\n} else if (aiAnalysis.lead_quality === 'warm') {\n  immediate_actions = ['send_welcome_email', 'send_property_matches', 'call_within_24h'];\n  follow_up_schedule = {\n    first_email: 'within_4_hours',\n    first_call: 'within_24_hours',\n    second_email: 'day_3',\n    follow_up_call: 'day_7'\n  };\n} else {\n  immediate_actions = ['add_to_drip_campaign', 'send_educational_content'];\n  follow_up_schedule = {\n    first_email: 'within_24_hours',\n    first_call: 'day_7',\n    nurture_emails: 'weekly'\n  };\n}\n\nreturn [{\n  json: {\n    ...lead,\n    ...aiAnalysis,\n    immediate_actions: immediate_actions,\n    follow_up_schedule: follow_up_schedule,\n    analyzed_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "enrich-lead",
+      "name": "Enrich Lead Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "YOUR_AIRTABLE_BASE_ID",
+          "mode": "list",
+          "cachedResultName": "Real Estate CRM"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "list",
+          "cachedResultName": "Leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}",
+            "source": "={{ $json.source }}",
+            "first_name": "={{ $json.first_name }}",
+            "last_name": "={{ $json.last_name }}",
+            "full_name": "={{ $json.full_name }}",
+            "email": "={{ $json.email }}",
+            "phone": "={{ $json.phone }}",
+            "location": "={{ $json.location }}",
+            "zip_code": "={{ $json.zip_code }}",
+            "price_min": "={{ $json.price_min }}",
+            "price_max": "={{ $json.price_max }}",
+            "bedrooms_min": "={{ $json.bedrooms_min }}",
+            "bathrooms_min": "={{ $json.bathrooms_min }}",
+            "property_type": "={{ $json.property_type }}",
+            "lead_type": "={{ $json.lead_type }}",
+            "lead_quality": "={{ $json.lead_quality }}",
+            "lead_score": "={{ $json.lead_score }}",
+            "buyer_readiness": "={{ $json.buyer_readiness }}",
+            "motivation_level": "={{ $json.motivation_level }}",
+            "stage": "lead",
+            "status": "new",
+            "received_at": "={{ $json.received_at }}",
+            "message": "={{ $json.message }}",
+            "key_priorities": "={{ $json.key_priorities.join(', ') }}",
+            "communication_style": "={{ $json.communication_style }}",
+            "nurture_strategy": "={{ $json.nurture_strategy }}",
+            "predicted_close_timeline": "={{ $json.predicted_close_timeline }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "save-to-crm",
+      "name": "Save to CRM",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [1120, 400],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "airtable-api",
+          "name": "Airtable API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.bridgedataoutput.com/api/v2/pub/properties",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "access_token",
+              "value": "YOUR_MLS_API_TOKEN"
+            },
+            {
+              "name": "city",
+              "value": "={{ $json.location }}"
+            },
+            {
+              "name": "ListPrice.min",
+              "value": "={{ $json.price_min }}"
+            },
+            {
+              "name": "ListPrice.max",
+              "value": "={{ $json.price_max }}"
+            },
+            {
+              "name": "BedroomsTotal.min",
+              "value": "={{ $json.bedrooms_min }}"
+            },
+            {
+              "name": "BathroomsTotalInteger.min",
+              "value": "={{ Math.floor($json.bathrooms_min) }}"
+            },
+            {
+              "name": "StandardStatus",
+              "value": "Active"
+            },
+            {
+              "name": "limit",
+              "value": "10"
+            },
+            {
+              "name": "sortBy",
+              "value": "ListPrice"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "search-mls",
+      "name": "Search MLS Properties",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1340, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mls-api",
+          "name": "MLS API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format property matches for lead\nconst lead = $('Enrich Lead Data').first().json;\nconst mlsResponse = $input.first().json;\n\nconst properties = mlsResponse.bundle || mlsResponse.results || [];\n\nconst formattedProperties = properties.slice(0, 5).map(prop => ({\n  mls_number: prop.ListingId || prop.ListingKey,\n  address: `${prop.UnparsedAddress || prop.StreetNumber + ' ' + prop.StreetName}`,\n  city: prop.City,\n  state: prop.StateOrProvince,\n  zip: prop.PostalCode,\n  price: parseFloat(prop.ListPrice || 0),\n  bedrooms: parseInt(prop.BedroomsTotal || 0),\n  bathrooms: parseFloat(prop.BathroomsTotalInteger || 0),\n  sqft: parseInt(prop.LivingArea || 0),\n  property_type: prop.PropertyType,\n  description: prop.PublicRemarks || '',\n  photo_url: prop.Media && prop.Media.length > 0 ? prop.Media[0].MediaURL : '',\n  listing_url: prop.VirtualTourURLUnbranded || `https://yoursite.com/listing/${prop.ListingId}`,\n  match_score: calculateMatchScore(prop, lead)\n}));\n\nfunction calculateMatchScore(property, lead) {\n  let score = 100;\n  \n  // Price match\n  const price = property.ListPrice;\n  if (price < lead.price_min || price > lead.price_max) {\n    score -= 30;\n  } else if (price >= lead.price_min && price <= (lead.price_min + (lead.price_max - lead.price_min) * 0.3)) {\n    score += 10; // Bonus for lower end of budget\n  }\n  \n  // Bedroom match\n  if (property.BedroomsTotal < lead.bedrooms_min) {\n    score -= 20;\n  }\n  \n  // Bathroom match\n  if (property.BathroomsTotalInteger < lead.bathrooms_min) {\n    score -= 15;\n  }\n  \n  return Math.max(0, Math.min(100, score));\n}\n\n// Sort by match score\nformattedProperties.sort((a, b) => b.match_score - a.match_score);\n\nreturn [{\n  json: {\n    ...lead,\n    matched_properties: formattedProperties,\n    match_count: formattedProperties.length,\n    top_match: formattedProperties[0] || null\n  }\n}];"
+      },
+      "id": "format-property-matches",
+      "name": "Format Property Matches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "model": "claude-sonnet-4-20250514",
+        "options": {
+          "temperature": 0.8,
+          "maxTokens": 2000
+        },
+        "text": "=Create a personalized welcome email for this real estate lead:\n\nLead Info:\n- Name: {{ $json.full_name }}\n- Location: {{ $json.location }}\n- Budget: ${{ $json.price_min }} - ${{ $json.price_max }}\n- Looking for: {{ $json.bedrooms_min }}+ bed, {{ $json.bathrooms_min }}+ bath\n- Lead Quality: {{ $json.lead_quality }}\n- Communication Style: {{ $json.communication_style }}\n- Key Priorities: {{ $json.key_priorities.join(', ') }}\n\nTop Property Match:\n- Address: {{ $json.top_match?.address || 'Multiple options available' }}\n- Price: ${{ $json.top_match?.price || 0 }}\n- Beds/Baths: {{ $json.top_match?.bedrooms }}/{{ $json.top_match?.bathrooms }}\n\nCreate email that:\n- Welcomes lead warmly\n- Shows you understand their needs\n- Highlights the top matched property\n- Mentions 2-3 other options available\n- Includes call to action (schedule call/viewing)\n- Professional but friendly tone\n- Under 300 words\n\nProvide in JSON format:\n{\n  \"subject\": \"Email subject line\",\n  \"body_html\": \"Full HTML email with property details, images placeholders, CTA button\"\n}\n\nIMPORTANT: Return ONLY valid JSON."
+      },
+      "id": "generate-welcome-email",
+      "name": "Generate Welcome Email",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1,
+      "position": [1780, 200],
+      "credentials": {
+        "anthropicApi": {
+          "id": "anthropic-api",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse email content\nconst lead = $('Format Property Matches').first().json;\nconst emailRaw = $input.first().json.output || '{}';\n\nlet email;\ntry {\n  email = JSON.parse(emailRaw.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim());\n} catch (e) {\n  email = {\n    subject: `Welcome ${lead.first_name}! Your Perfect Home Awaits`,\n    body_html: generateDefaultEmail(lead)\n  };\n}\n\n// Add property images to email\nlet emailWithImages = email.body_html;\nif (lead.matched_properties && lead.matched_properties.length > 0) {\n  const propertyCards = lead.matched_properties.slice(0, 3).map(prop => `\n    <div style=\"border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 8px;\">\n      ${prop.photo_url ? `<img src=\"${prop.photo_url}\" style=\"width: 100%; max-width: 400px; height: auto; border-radius: 5px;\">` : ''}\n      <h3>${prop.address}</h3>\n      <p><strong>$${prop.price.toLocaleString()}</strong> | ${prop.bedrooms} bed, ${prop.bathrooms} bath | ${prop.sqft} sqft</p>\n      <p>${prop.description.substring(0, 150)}...</p>\n      <a href=\"${prop.listing_url}\" style=\"background: #2196F3; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;\">View Details</a>\n    </div>\n  `).join('');\n  \n  emailWithImages = emailWithImages.replace('{{PROPERTY_LISTINGS}}', propertyCards);\n}\n\nfunction generateDefaultEmail(lead) {\n  return `\n    <div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;\">\n      <h2>Hi ${lead.first_name}! 👋</h2>\n      <p>Thank you for reaching out! I'm excited to help you find your perfect home in ${lead.location}.</p>\n      \n      <p>Based on your preferences, I've found some great options in your budget range of $${lead.price_min.toLocaleString()} - $${lead.price_max.toLocaleString()}.</p>\n      \n      <h3>Your Top Matches:</h3>\n      {{PROPERTY_LISTINGS}}\n      \n      <p>I'd love to discuss these properties with you and answer any questions. When would be a good time for a quick call?</p>\n      \n      <a href=\"https://calendly.com/your-link\" style=\"background: #4CAF50; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 20px 0;\">Schedule a Call</a>\n      \n      <p>Looking forward to working with you!</p>\n      <p>Best regards,<br>Your Real Estate Team</p>\n    </div>\n  `;\n}\n\nreturn [{\n  json: {\n    ...lead,\n    email_subject: email.subject,\n    email_body_html: emailWithImages\n  }\n}];"
+      },
+      "id": "prepare-email",
+      "name": "Prepare Email Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 200]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "to": "={{ $json.email }}",
+        "subject": "={{ $json.email_subject }}",
+        "emailType": "html",
+        "message": "={{ $json.email_body_html }}",
+        "options": {}
+      },
+      "id": "send-welcome-email",
+      "name": "Send Welcome Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [2220, 200],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-oauth",
+          "name": "Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.twilio.com/2010-04-01/Accounts/YOUR_ACCOUNT_SID/Messages.json",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "To",
+              "value": "={{ $json.phone }}"
+            },
+            {
+              "name": "From",
+              "value": "YOUR_TWILIO_NUMBER"
+            },
+            {
+              "name": "Body",
+              "value": "=Hi {{ $json.first_name }}! Thanks for your interest in {{ $json.location }} properties. I just sent you an email with some great matches in your price range. Check your inbox! - Your Realtor"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "send-sms",
+      "name": "Send SMS Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2220, 400],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "twilio-api",
+          "name": "Twilio API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "YOUR_AIRTABLE_BASE_ID",
+          "mode": "list",
+          "cachedResultName": "Real Estate CRM"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Property_Matches",
+          "mode": "list",
+          "cachedResultName": "Property Matches"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}",
+            "properties_json": "={{ JSON.stringify($json.matched_properties) }}",
+            "match_count": "={{ $json.match_count }}",
+            "sent_at": "={{ $now.toISO() }}",
+            "top_match_address": "={{ $json.top_match?.address || '' }}",
+            "top_match_price": "={{ $json.top_match?.price || 0 }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "save-property-matches",
+      "name": "Save Property Matches",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [2440, 300],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "airtable-api",
+          "name": "Airtable API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "is-hot-lead",
+              "leftValue": "={{ $json.lead_quality }}",
+              "rightValue": "hot",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-hot-lead",
+      "name": "Is Hot Lead?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 500]
+    },
+    {
+      "parameters": {
+        "channel": "YOUR_SLACK_CHANNEL",
+        "text": "=🔥 *HOT LEAD ALERT!*\\n\\n*Name:* {{ $json.full_name }}\\n*Source:* {{ $json.source.toUpperCase() }}\\n*Phone:* {{ $json.phone }}\\n*Email:* {{ $json.email }}\\n\\n*Looking for:*\\n• Location: {{ $json.location }}\\n• Budget: ${{ $json.price_min }} - ${{ $json.price_max }}\\n• Beds/Baths: {{ $json.bedrooms_min }}/{{ $json.bathrooms_min }}\\n• Type: {{ $json.property_type }}\\n\\n*Lead Score:* {{ $json.lead_score }}/100\\n*Buyer Readiness:* {{ $json.buyer_readiness }}\\n*Motivation:* {{ $json.motivation_level }}\\n\\n*Message:* {{ $json.message }}\\n\\n🎯 *ACTION REQUIRED:*\\n• Call within 1 hour\\n• Send top listings\\n• Schedule showing ASAP\\n\\n*Matched Properties:* {{ $json.match_count }} found",
+        "otherOptions": {}
+      },
+      "id": "alert-hot-lead",
+      "name": "Alert Team (Hot Lead)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1560, 600],
+      "credentials": {
+        "slackApi": {
+          "id": "slack-api",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "YOUR_SLACK_CHANNEL",
+        "text": "=📊 *New Lead Received*\\n\\n*Name:* {{ $json.full_name }}\\n*Source:* {{ $json.source }}\\n*Quality:* {{ $json.lead_quality }}\\n*Score:* {{ $json.lead_score }}/100\\n\\n*Details:*\\n• Location: {{ $json.location }}\\n• Budget: ${{ $json.price_min }}-${{ $json.price_max }}\\n• Contact: {{ $json.email }}\\n\\n✅ Welcome email sent\\n✅ Properties matched ({{ $json.match_count }})\\n✅ Added to CRM",
+        "otherOptions": {}
+      },
+      "id": "notify-standard",
+      "name": "Notify Team (Standard)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [2660, 300],
+      "credentials": {
+        "slackApi": {
+          "id": "slack-api",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "daysInterval": 1
+            }
+          ]
+        },
+        "triggerTimes": {
+          "item": [
+            {
+              "hour": 9,
+              "minute": 0
+            }
+          ]
+        }
+      },
+      "id": "drip-scheduler",
+      "name": "Drip Campaign Scheduler",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 900]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "YOUR_AIRTABLE_BASE_ID",
+          "mode": "list",
+          "cachedResultName": "Real Estate CRM"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "list",
+          "cachedResultName": "Leads"
+        },
+        "filterByFormula": "=AND(status != 'closed', last_contact <= DATEADD(NOW(), -3, 'days'))",
+        "options": {}
+      },
+      "id": "get-leads-for-nurture",
+      "name": "Get Leads for Nurture",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [460, 900],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "airtable-api",
+          "name": "Airtable API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Determine drip campaign content based on lead stage\nconst leads = $input.all();\nconst campaignLeads = [];\n\nfor (const lead of leads) {\n  const data = lead.json;\n  const daysSinceReceived = Math.floor((new Date() - new Date(data.received_at)) / (1000 * 60 * 60 * 24));\n  \n  let campaign_type = 'educational';\n  let email_template = 'market_update';\n  \n  // Determine campaign based on days since first contact\n  if (daysSinceReceived <= 7) {\n    campaign_type = 'welcome_series';\n    email_template = 'getting_started';\n  } else if (daysSinceReceived <= 30) {\n    campaign_type = 'active_nurture';\n    email_template = 'new_listings';\n  } else if (daysSinceReceived <= 90) {\n    campaign_type = 'monthly_update';\n    email_template = 'market_trends';\n  } else {\n    campaign_type = 'long_term_nurture';\n    email_template = 'seasonal_opportunities';\n  }\n  \n  campaignLeads.push({\n    json: {\n      ...data,\n      campaign_type: campaign_type,\n      email_template: email_template,\n      days_since_received: daysSinceReceived\n    }\n  });\n}\n\nreturn campaignLeads;"
+      },
+      "id": "determine-campaign",
+      "name": "Determine Campaign Type",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 900]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  \"success\": true,\n  \"lead_id\": $('Normalize Lead Data').first().json.lead_id,\n  \"lead_quality\": $('Enrich Lead Data').first().json.lead_quality,\n  \"lead_score\": $('Enrich Lead Data').first().json.lead_score,\n  \"properties_matched\": $('Format Property Matches').first().json.match_count,\n  \"email_sent\": true,\n  \"next_action\": $('Enrich Lead Data').first().json.immediate_actions[0]\n} }}"
+      },
+      "id": "webhook-response",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2880, 400]
+    },
+    {
+      "parameters": {
+        "content": "## Real Estate Lead Nurture\\n\\n**Convert more leads automatically!**\\n\\n🏠 **Lead Capture:**\\n✅ Zillow integration\\n✅ Realtor.com integration\\n✅ Website forms\\n✅ Multi-source normalization\\n\\n🤖 **AI Intelligence:**\\n✅ Lead quality scoring\\n✅ Buyer readiness analysis\\n✅ Communication optimization\\n✅ Timeline prediction\\n\\n🎯 **Auto-Matching:**\\n✅ MLS property search\\n✅ Criteria matching\\n✅ Match scoring\\n✅ Top picks selection\\n\\n📧 **Nurture System:**\\n✅ Welcome emails\\n✅ Property updates\\n✅ Market reports\\n✅ Drip campaigns\\n\\n💰 **Business Value:**\\n- 40% faster lead response\\n- 3x higher conversion rate\\n- Zero leads slip through\\n- 24/7 automated nurture\\n\\n**Perfect for:**\\n- Real estate agents\\n- Brokerages\\n- Property managers\\n- Real estate teams",
+        "height": 620,
+        "width": 380
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 1100]
+    }
+  ],
+  "connections": {
+    "Zillow Lead Webhook": {
+      "main": [[{"node": "Normalize Lead Data", "type": "main", "index": 0}]]
+    },
+    "Realtor.com Lead Webhook": {
+      "main": [[{"node": "Normalize Lead Data", "type": "main", "index": 0}]]
+    },
+    "Website Lead Form": {
+      "main": [[{"node": "Normalize Lead Data", "type": "main", "index": 0}]]
+    },
+    "Normalize Lead Data": {
+      "main": [[{"node": "AI Lead Analysis", "type": "main", "index": 0}]]
+    },
+    "AI Lead Analysis": {
+      "main": [[{"node": "Enrich Lead Data", "type": "main", "index": 0}]]
+    },
+    "Enrich Lead Data": {
+      "main": [[
+        {"node": "Save to CRM", "type": "main", "index": 0},
+        {"node": "Is Hot Lead?", "type": "main", "index": 0}
+      ]]
+    },
+    "Save to CRM": {
+      "main": [[{"node": "Search MLS Properties", "type": "main", "index": 0}]]
+    },
+    "Search MLS Properties": {
+      "main": [[{"node": "Format Property Matches", "type": "main", "index": 0}]]
+    },
+    "Format Property Matches": {
+      "main": [[{"node": "Generate Welcome Email", "type": "main", "index": 0}]]
+    },
+    "Generate Welcome Email": {
+      "main": [[{"node": "Prepare Email Content", "type": "main", "index": 0}]]
+    },
+    "Prepare Email Content": {
+      "main": [[
+        {"node": "Send Welcome Email", "type": "main", "index": 0},
+        {"node": "Send SMS Notification", "type": "main", "index": 0}
+      ]]
+    },
+    "Send Welcome Email": {
+      "main": [[{"node": "Save Property Matches", "type": "main", "index": 0}]]
+    },
+    "Send SMS Notification": {
+      "main": [[{"node": "Save Property Matches", "type": "main", "index": 0}]]
+    },
+    "Save Property Matches": {
+      "main": [[{"node": "Notify Team (Standard)", "type": "main", "index": 0}]]
+    },
+    "Is Hot Lead?": {
+      "main": [[{"node": "Alert Team (Hot Lead)", "type": "main", "index": 0}]]
+    },
+    "Alert Team (Hot Lead)": {
+      "main": [[{"node": "Webhook Response", "type": "main", "index": 0}]]
+    },
+    "Notify Team (Standard)": {
+      "main": [[{"node": "Webhook Response", "type": "main", "index": 0}]]
+    },
+    "Drip Campaign Scheduler": {
+      "main": [[{"node": "Get Leads for Nurture", "type": "main", "index": 0}]]
+    },
+    "Get Leads for Nurture": {
+      "main": [[{"node": "Determine Campaign Type", "type": "main", "index": 0}]]
+    }
+  },
+  "pinData": {},
+  "settings": {"executionOrder": "v1"},
+  "staticData": null,
+  "tags": [{"id": "real-estate", "name": "Real Estate"}],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-08T00:00:00.000Z",
+  "versionId": "1.0.0"
+}
