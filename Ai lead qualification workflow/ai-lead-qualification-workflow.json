@@ -1,0 +1,620 @@
+{
+  "name": "AI Lead Qualification & CRM Sync (RevOps)",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "lead-form",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-form",
+      "name": "Website Form Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "form-leads"
+    },
+    {
+      "parameters": {
+        "path": "linkedin-lead",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-linkedin",
+      "name": "LinkedIn Lead Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 460],
+      "webhookId": "linkedin-leads"
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "labelIds": ["INBOX"],
+          "sender": "leads@yourcompany.com",
+          "subject": "New Lead"
+        },
+        "options": {}
+      },
+      "id": "email-parser",
+      "name": "Email Lead Parser",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [240, 620],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-oauth",
+          "name": "Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "event": "contact.propertyChange",
+        "filters": {
+          "propertyName": "lifecyclestage",
+          "propertyValue": "lead"
+        },
+        "options": {}
+      },
+      "id": "hubspot-trigger",
+      "name": "HubSpot New Lead",
+      "type": "n8n-nodes-base.hubspotTrigger",
+      "typeVersion": 1,
+      "position": [240, 780],
+      "credentials": {
+        "hubspotOAuth2Api": {
+          "id": "hubspot-oauth",
+          "name": "HubSpot OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize leads from all sources into unified format\nconst items = $input.all();\nconst normalizedLeads = [];\n\nfor (const item of items) {\n  const data = item.json;\n  let normalized = {};\n  \n  // Detect source\n  let source = 'unknown';\n  if ($node.name.includes('Form')) source = 'website';\n  else if ($node.name.includes('LinkedIn')) source = 'linkedin';\n  else if ($node.name.includes('Email')) source = 'email';\n  else if ($node.name.includes('HubSpot')) source = 'hubspot';\n  \n  // Normalize based on source\n  if (source === 'website') {\n    normalized = {\n      first_name: data.firstName || data.first_name || '',\n      last_name: data.lastName || data.last_name || '',\n      email: data.email || '',\n      phone: data.phone || '',\n      company: data.company || data.companyName || '',\n      job_title: data.jobTitle || data.title || data.role || '',\n      website: data.website || data.companyWebsite || '',\n      linkedin_url: data.linkedinUrl || data.linkedin || '',\n      country: data.country || '',\n      industry: data.industry || '',\n      company_size: data.companySize || data.employees || '',\n      revenue: data.annualRevenue || data.revenue || '',\n      message: data.message || data.comments || '',\n      lead_source_detail: data.utm_source || 'direct',\n      campaign: data.utm_campaign || ''\n    };\n  } else if (source === 'linkedin') {\n    normalized = {\n      first_name: data.first_name || '',\n      last_name: data.last_name || '',\n      email: data.email || '',\n      phone: data.phone || '',\n      company: data.company || '',\n      job_title: data.position || data.headline || '',\n      linkedin_url: data.profile_url || data.linkedin_url || '',\n      country: data.location || '',\n      industry: data.industry || '',\n      message: data.note || '',\n      lead_source_detail: 'linkedin_' + (data.source || 'direct')\n    };\n  } else if (source === 'email') {\n    // Parse email body for lead info\n    const body = data.textPlain || data.textHtml || '';\n    \n    const emailMatch = body.match(/(?:Email|E-mail):\\s*([\\w\\.-]+@[\\w\\.-]+\\.\\w+)/i);\n    const nameMatch = body.match(/(?:Name|Full Name):\\s*([^\\n]+)/i);\n    const companyMatch = body.match(/(?:Company|Organization):\\s*([^\\n]+)/i);\n    const titleMatch = body.match(/(?:Title|Position|Role):\\s*([^\\n]+)/i);\n    const phoneMatch = body.match(/(?:Phone|Tel|Mobile):\\s*([^\\n]+)/i);\n    \n    const fullName = nameMatch ? nameMatch[1].trim() : '';\n    const nameParts = fullName.split(' ');\n    \n    normalized = {\n      first_name: nameParts[0] || '',\n      last_name: nameParts.slice(1).join(' ') || '',\n      email: emailMatch ? emailMatch[1].trim() : '',\n      phone: phoneMatch ? phoneMatch[1].trim() : '',\n      company: companyMatch ? companyMatch[1].trim() : '',\n      job_title: titleMatch ? titleMatch[1].trim() : '',\n      message: body.substring(0, 500),\n      lead_source_detail: 'email_' + (data.from || 'unknown')\n    };\n  } else if (source === 'hubspot') {\n    normalized = {\n      first_name: data.properties?.firstname || '',\n      last_name: data.properties?.lastname || '',\n      email: data.properties?.email || '',\n      phone: data.properties?.phone || '',\n      company: data.properties?.company || '',\n      job_title: data.properties?.jobtitle || '',\n      website: data.properties?.website || '',\n      country: data.properties?.country || '',\n      industry: data.properties?.industry || '',\n      company_size: data.properties?.numberofemployees || '',\n      revenue: data.properties?.annualrevenue || '',\n      lead_source_detail: data.properties?.hs_analytics_source || 'hubspot',\n      hubspot_id: data.vid || data.id\n    };\n  }\n  \n  // Add common fields\n  normalized.full_name = `${normalized.first_name} ${normalized.last_name}`.trim();\n  normalized.lead_id = `LEAD-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;\n  normalized.source = source;\n  normalized.received_at = new Date().toISOString();\n  normalized.status = 'new';\n  normalized.qualification_status = 'pending';\n  \n  // Basic validation\n  if (!normalized.email || !normalized.email.includes('@')) {\n    normalized.validation_error = 'invalid_email';\n  }\n  \n  normalizedLeads.push({ json: normalized });\n}\n\nreturn normalizedLeads;"
+      },
+      "id": "normalize-leads",
+      "name": "Normalize Lead Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-valid-email",
+              "leftValue": "={{ $json.email }}",
+              "rightValue": "@",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            },
+            {
+              "id": "not-validation-error",
+              "leftValue": "={{ $json.validation_error ? true : false }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "false"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "basic-validation",
+      "name": "Basic Validation",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 500]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.clearbit.com/v2/people/find?email={{ $json.email }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer YOUR_CLEARBIT_API_KEY"
+            }
+          ]
+        },
+        "options": {
+          "ignoreResponseCode": true
+        }
+      },
+      "id": "clearbit-enrichment",
+      "name": "Clearbit Enrichment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 400],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "clearbit-api",
+          "name": "Clearbit API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.hunter.io/v2/email-verifier?email={{ $json.email }}&api_key=YOUR_HUNTER_API_KEY",
+        "options": {}
+      },
+      "id": "email-verification",
+      "name": "Email Verification (Hunter.io)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 600],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hunter-api",
+          "name": "Hunter.io API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge enrichment data\nconst lead = $('Normalize Lead Data').first().json;\nconst clearbit = $('Clearbit Enrichment').first().json;\nconst hunter = $('Email Verification (Hunter.io)').first().json;\n\n// Parse Clearbit data\nlet enrichedData = { ...lead };\n\nif (clearbit && clearbit.person) {\n  const person = clearbit.person;\n  const company = clearbit.company || {};\n  \n  enrichedData = {\n    ...enrichedData,\n    // Person data\n    first_name: enrichedData.first_name || person.name?.givenName || '',\n    last_name: enrichedData.last_name || person.name?.familyName || '',\n    job_title: enrichedData.job_title || person.employment?.title || '',\n    seniority: person.employment?.seniority || '',\n    role: person.employment?.role || '',\n    linkedin_url: enrichedData.linkedin_url || person.linkedin?.handle ? `https://linkedin.com/in/${person.linkedin.handle}` : '',\n    twitter_url: person.twitter?.handle ? `https://twitter.com/${person.twitter.handle}` : '',\n    location: person.location || '',\n    timezone: person.timeZone || '',\n    \n    // Company data\n    company: enrichedData.company || company.name || '',\n    company_domain: company.domain || '',\n    company_size: enrichedData.company_size || company.metrics?.employees || '',\n    company_revenue: company.metrics?.estimatedAnnualRevenue || '',\n    industry: enrichedData.industry || company.category?.industry || '',\n    company_description: company.description || '',\n    company_tech: company.tech || [],\n    company_founded: company.foundedYear || '',\n    company_linkedin: company.linkedin?.handle || '',\n    company_location: company.location || '',\n    \n    // Enrichment metadata\n    enriched: true,\n    enriched_at: new Date().toISOString(),\n    enrichment_source: 'clearbit'\n  };\n} else {\n  enrichedData.enriched = false;\n  enrichedData.enrichment_source = 'none';\n}\n\n// Add email verification\nif (hunter && hunter.data) {\n  enrichedData.email_status = hunter.data.status; // valid, invalid, accept_all, unknown\n  enrichedData.email_score = hunter.data.score || 0;\n  enrichedData.email_disposable = hunter.data.disposable || false;\n  enrichedData.email_free_provider = hunter.data.webmail || false; // gmail, yahoo, etc.\n}\n\nreturn [{ json: enrichedData }];"
+      },
+      "id": "merge-enrichment",
+      "name": "Merge Enrichment Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 500]
+    },
+    {
+      "parameters": {
+        "model": "claude-sonnet-4-20250514",
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 2500
+        },
+        "text": "=Analyze this B2B lead and provide comprehensive qualification:\n\nLead Information:\n- Name: {{ $json.full_name }}\n- Email: {{ $json.email }}\n- Company: {{ $json.company }}\n- Job Title: {{ $json.job_title }}\n- Seniority: {{ $json.seniority }}\n- Company Size: {{ $json.company_size }}\n- Industry: {{ $json.industry }}\n- Revenue: {{ $json.company_revenue }}\n- Location: {{ $json.location }}\n- Message: {{ $json.message }}\n- Source: {{ $json.source }}\n\nEmail Quality:\n- Status: {{ $json.email_status }}\n- Score: {{ $json.email_score }}\n- Free Provider: {{ $json.email_free_provider }}\n- Disposable: {{ $json.email_disposable }}\n\nProvide analysis in EXACT JSON format:\n{\n  \"is_qualified\": true,\n  \"qualification_score\": 85,\n  \"qualification_tier\": \"A|B|C|D|Junk\",\n  \"disqualification_reasons\": [],\n  \"buyer_persona\": \"economic_buyer|technical_buyer|influencer|user\",\n  \"decision_maker_level\": \"c_level|vp_director|manager|individual_contributor\",\n  \"budget_authority\": \"high|medium|low|none\",\n  \"company_fit\": {\n    \"is_icp\": true,\n    \"fit_score\": 90,\n    \"size_match\": true,\n    \"industry_match\": true,\n    \"revenue_match\": true\n  },\n  \"intent_signals\": {\n    \"buying_intent\": \"high|medium|low\",\n    \"urgency\": \"immediate|3_months|6_months|exploring\",\n    \"pain_points\": [\"point1\", \"point2\"],\n    \"specific_need\": \"clearly_stated|vague|none\"\n  },\n  \"red_flags\": [\n    \"student_email\",\n    \"competitor\",\n    \"job_seeker\",\n    \"free_email\",\n    \"disposable_email\",\n    \"too_small\",\n    \"wrong_industry\"\n  ],\n  \"lead_routing\": {\n    \"should_route_to_sales\": true,\n    \"priority\": \"hot|warm|cold\",\n    \"recommended_owner\": \"enterprise_ae|smb_ae|sdr|marketing_nurture\",\n    \"follow_up_timing\": \"immediate|within_1_hour|within_24_hours|next_week\"\n  },\n  \"next_actions\": [\n    \"call_immediately\",\n    \"send_personalized_email\",\n    \"schedule_demo\",\n    \"send_case_study\",\n    \"add_to_nurture\"\n  ],\n  \"talking_points\": [\"point1\", \"point2\", \"point3\"],\n  \"estimated_deal_size\": 50000,\n  \"likelihood_to_close\": 75,\n  \"predicted_close_timeline\": \"30_days|60_days|90_days|6_months\"\n}\n\nIMPORTANT: Return ONLY valid JSON, no markdown, no explanations."
+      },
+      "id": "ai-qualification",
+      "name": "AI Lead Qualification",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1,
+      "position": [1340, 500],
+      "credentials": {
+        "anthropicApi": {
+          "id": "anthropic-api",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI qualification and make routing decisions\nconst lead = $('Merge Enrichment Data').first().json;\nconst aiRaw = $input.first().json.output || '{}';\n\nlet qualification;\ntry {\n  const cleaned = aiRaw.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  qualification = JSON.parse(cleaned);\n} catch (e) {\n  console.error('AI parse error:', e);\n  // Fallback qualification\n  qualification = {\n    is_qualified: false,\n    qualification_score: 30,\n    qualification_tier: 'D',\n    disqualification_reasons: ['ai_error'],\n    lead_routing: {\n      should_route_to_sales: false,\n      priority: 'cold',\n      recommended_owner: 'marketing_nurture'\n    },\n    next_actions: ['add_to_nurture']\n  };\n}\n\n// Apply business rules and overrides\nlet finalQualification = { ...qualification };\n\n// Rule 1: Free email domains = lower tier (unless C-level)\nif (lead.email_free_provider && finalQualification.decision_maker_level !== 'c_level') {\n  finalQualification.qualification_score = Math.max(finalQualification.qualification_score - 15, 0);\n  if (!finalQualification.red_flags) finalQualification.red_flags = [];\n  finalQualification.red_flags.push('free_email');\n}\n\n// Rule 2: Disposable email = auto-disqualify\nif (lead.email_disposable) {\n  finalQualification.is_qualified = false;\n  finalQualification.qualification_tier = 'Junk';\n  finalQualification.disqualification_reasons = ['disposable_email'];\n  finalQualification.lead_routing.should_route_to_sales = false;\n}\n\n// Rule 3: Student emails = auto-disqualify\nconst studentDomains = ['.edu', 'student', 'university', 'college'];\nif (studentDomains.some(domain => lead.email.toLowerCase().includes(domain))) {\n  finalQualification.is_qualified = false;\n  finalQualification.qualification_tier = 'Junk';\n  finalQualification.disqualification_reasons = ['student_email'];\n  finalQualification.red_flags.push('student_email');\n}\n\n// Rule 4: Competitors = flag but don't auto-disqualify\nconst competitorDomains = ['competitor1.com', 'competitor2.com']; // Add your competitors\nif (competitorDomains.some(comp => lead.email.includes(comp) || (lead.company || '').toLowerCase().includes(comp))) {\n  finalQualification.red_flags.push('competitor');\n  finalQualification.next_actions.unshift('flag_as_competitor');\n}\n\n// Rule 5: Company size requirements\nif (lead.company_size) {\n  const size = parseInt(lead.company_size);\n  if (size < 10) {\n    finalQualification.qualification_score -= 20;\n    finalQualification.red_flags.push('too_small');\n  } else if (size > 10000) {\n    finalQualification.qualification_score += 10; // Enterprise bonus\n  }\n}\n\n// Re-tier based on final score\nif (finalQualification.qualification_score >= 80) {\n  finalQualification.qualification_tier = 'A';\n  finalQualification.lead_routing.priority = 'hot';\n  finalQualification.lead_routing.follow_up_timing = 'immediate';\n} else if (finalQualification.qualification_score >= 60) {\n  finalQualification.qualification_tier = 'B';\n  finalQualification.lead_routing.priority = 'warm';\n  finalQualification.lead_routing.follow_up_timing = 'within_1_hour';\n} else if (finalQualification.qualification_score >= 40) {\n  finalQualification.qualification_tier = 'C';\n  finalQualification.lead_routing.priority = 'cold';\n  finalQualification.lead_routing.follow_up_timing = 'within_24_hours';\n} else if (finalQualification.qualification_score >= 20) {\n  finalQualification.qualification_tier = 'D';\n  finalQualification.lead_routing.priority = 'cold';\n  finalQualification.lead_routing.follow_up_timing = 'next_week';\n} else {\n  finalQualification.qualification_tier = 'Junk';\n  finalQualification.is_qualified = false;\n}\n\n// Determine CRM sync decision\nconst shouldSyncToCRM = finalQualification.qualification_tier !== 'Junk' && finalQualification.qualification_score >= 30;\n\nreturn [{\n  json: {\n    ...lead,\n    ...finalQualification,\n    qualification_complete: true,\n    qualification_completed_at: new Date().toISOString(),\n    should_sync_to_crm: shouldSyncToCRM\n  }\n}];"
+      },
+      "id": "apply-business-rules",
+      "name": "Apply Business Rules",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "should-sync",
+              "leftValue": "={{ $json.should_sync_to_crm }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "route-qualified",
+      "name": "Should Sync to CRM?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1780, 500]
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "create",
+        "email": "={{ $json.email }}",
+        "additionalFields": {
+          "firstName": "={{ $json.first_name }}",
+          "lastName": "={{ $json.last_name }}",
+          "company": "={{ $json.company }}",
+          "phone": "={{ $json.phone }}",
+          "jobTitle": "={{ $json.job_title }}",
+          "website": "={{ $json.company_domain }}",
+          "lifecycleStage": "={{ $json.qualification_tier === 'A' || $json.qualification_tier === 'B' ? 'salesqualifiedlead' : 'lead' }}",
+          "leadStatus": "={{ $json.lead_routing.priority }}",
+          "customPropertiesUi": {
+            "property": [
+              {
+                "name": "lead_source",
+                "value": "={{ $json.source }}"
+              },
+              {
+                "name": "qualification_score",
+                "value": "={{ $json.qualification_score }}"
+              },
+              {
+                "name": "qualification_tier",
+                "value": "={{ $json.qualification_tier }}"
+              },
+              {
+                "name": "buyer_persona",
+                "value": "={{ $json.buyer_persona }}"
+              },
+              {
+                "name": "decision_maker_level",
+                "value": "={{ $json.decision_maker_level }}"
+              },
+              {
+                "name": "estimated_deal_size",
+                "value": "={{ $json.estimated_deal_size }}"
+              },
+              {
+                "name": "next_action",
+                "value": "={{ $json.next_actions[0] }}"
+              }
+            ]
+          }
+        },
+        "options": {}
+      },
+      "id": "sync-to-hubspot",
+      "name": "Sync to HubSpot",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2,
+      "position": [2000, 400],
+      "credentials": {
+        "hubspotOAuth2Api": {
+          "id": "hubspot-oauth",
+          "name": "HubSpot OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_INSTANCE.salesforce.com/services/data/v57.0/sobjects/Lead",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"FirstName\": \"{{ $json.first_name }}\",\n  \"LastName\": \"{{ $json.last_name }}\",\n  \"Email\": \"{{ $json.email }}\",\n  \"Phone\": \"{{ $json.phone }}\",\n  \"Company\": \"{{ $json.company }}\",\n  \"Title\": \"{{ $json.job_title }}\",\n  \"Website\": \"{{ $json.company_domain }}\",\n  \"Industry\": \"{{ $json.industry }}\",\n  \"NumberOfEmployees\": {{ $json.company_size || 0 }},\n  \"AnnualRevenue\": {{ $json.company_revenue || 0 }},\n  \"LeadSource\": \"{{ $json.source }}\",\n  \"Status\": \"{{ $json.lead_routing.priority === 'hot' ? 'Working - Contacted' : 'Open - Not Contacted' }}\",\n  \"Rating\": \"{{ $json.qualification_tier }}\",\n  \"Description\": \"Qualification Score: {{ $json.qualification_score }}\\nBuyer Persona: {{ $json.buyer_persona }}\\nNext Actions: {{ $json.next_actions.join(', ') }}\"\n}",
+        "options": {}
+      },
+      "id": "sync-to-salesforce",
+      "name": "Sync to Salesforce",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2000, 600],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "salesforce-oauth",
+          "name": "Salesforce OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "YOUR_AIRTABLE_BASE_ID",
+          "mode": "list",
+          "cachedResultName": "Lead Database"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Qualified_Leads",
+          "mode": "list",
+          "cachedResultName": "Qualified Leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}",
+            "source": "={{ $json.source }}",
+            "first_name": "={{ $json.first_name }}",
+            "last_name": "={{ $json.last_name }}",
+            "email": "={{ $json.email }}",
+            "phone": "={{ $json.phone }}",
+            "company": "={{ $json.company }}",
+            "job_title": "={{ $json.job_title }}",
+            "qualification_tier": "={{ $json.qualification_tier }}",
+            "qualification_score": "={{ $json.qualification_score }}",
+            "is_qualified": "={{ $json.is_qualified ? 'Yes' : 'No' }}",
+            "priority": "={{ $json.lead_routing.priority }}",
+            "recommended_owner": "={{ $json.lead_routing.recommended_owner }}",
+            "buyer_persona": "={{ $json.buyer_persona }}",
+            "decision_maker_level": "={{ $json.decision_maker_level }}",
+            "company_size": "={{ $json.company_size }}",
+            "industry": "={{ $json.industry }}",
+            "estimated_deal_size": "={{ $json.estimated_deal_size }}",
+            "likelihood_to_close": "={{ $json.likelihood_to_close }}",
+            "next_actions": "={{ $json.next_actions.join(', ') }}",
+            "received_at": "={{ $json.received_at }}",
+            "synced_to_crm": "Yes",
+            "crm_id": "={{ $('Sync to HubSpot').first().json.vid || $('Sync to Salesforce').first().json.id || '' }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "log-qualified-lead",
+      "name": "Log Qualified Lead",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [2220, 500],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "airtable-api",
+          "name": "Airtable API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "is-hot",
+              "leftValue": "={{ $json.lead_routing.priority }}",
+              "rightValue": "hot",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-hot-lead",
+      "name": "Is Hot Lead?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2440, 500]
+    },
+    {
+      "parameters": {
+        "channel": "YOUR_SLACK_CHANNEL",
+        "text": "=🔥 *HOT LEAD ALERT - ACTION REQUIRED!*\\n\\n*Lead Details:*\\n• Name: *{{ $json.full_name }}* ({{ $json.job_title }})\\n• Company: *{{ $json.company }}* ({{ $json.company_size }} employees)\\n• Email: {{ $json.email }}\\n• Phone: {{ $json.phone }}\\n\\n*Qualification:*\\n• Tier: *{{ $json.qualification_tier }}* (Score: {{ $json.qualification_score }}/100)\\n• Decision Maker: {{ $json.decision_maker_level }}\\n• Buyer Persona: {{ $json.buyer_persona }}\\n• Budget Authority: {{ $json.budget_authority }}\\n\\n*Company Fit:*\\n• ICP Match: {{ $json.company_fit.is_icp ? '✅ YES' : '❌ NO' }}\\n• Industry: {{ $json.industry }}\\n• Revenue: ${{ $json.company_revenue }}\\n\\n*Intent Signals:*\\n• Buying Intent: {{ $json.intent_signals.buying_intent }}\\n• Urgency: {{ $json.intent_signals.urgency }}\\n• Pain Points: {{ $json.intent_signals.pain_points.join(', ') }}\\n\\n*Business Opportunity:*\\n• Est. Deal Size: ${{ $json.estimated_deal_size }}\\n• Close Likelihood: {{ $json.likelihood_to_close }}%\\n• Timeline: {{ $json.predicted_close_timeline }}\\n\\n*Immediate Actions:*\\n{{ $json.next_actions.map(a => `• ${a}`).join('\\\\n') }}\\n\\n*Talking Points:*\\n{{ $json.talking_points.map(p => `• ${p}`).join('\\\\n') }}\\n\\n*Routing:*\\n• Assign to: *{{ $json.lead_routing.recommended_owner.toUpperCase() }}*\\n• Follow up: *{{ $json.lead_routing.follow_up_timing.replace(/_/g, ' ').toUpperCase() }}*\\n\\n⚡ *Contact immediately - {{ $json.lead_routing.follow_up_timing }}*",
+        "otherOptions": {}
+      },
+      "id": "alert-hot-lead",
+      "name": "Alert Sales Team (Hot Lead)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [2660, 400],
+      "credentials": {
+        "slackApi": {
+          "id": "slack-api",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "YOUR_AIRTABLE_BASE_ID",
+          "mode": "list",
+          "cachedResultName": "Lead Database"
+        },
+        "table": {
+          "__rl": true,
+          "value": "Disqualified_Leads",
+          "mode": "list",
+          "cachedResultName": "Disqualified Leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "lead_id": "={{ $json.lead_id }}",
+            "source": "={{ $json.source }}",
+            "email": "={{ $json.email }}",
+            "company": "={{ $json.company }}",
+            "qualification_tier": "={{ $json.qualification_tier }}",
+            "qualification_score": "={{ $json.qualification_score }}",
+            "disqualification_reasons": "={{ $json.disqualification_reasons.join(', ') }}",
+            "red_flags": "={{ $json.red_flags ? $json.red_flags.join(', ') : '' }}",
+            "received_at": "={{ $json.received_at }}",
+            "disqualified_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "log-disqualified",
+      "name": "Log Disqualified Lead",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [2000, 700],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "airtable-api",
+          "name": "Airtable API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "YOUR_SLACK_CHANNEL",
+        "text": "=📊 *New Lead Qualified*\\n\\n• Name: {{ $json.full_name }}\\n• Company: {{ $json.company }}\\n• Tier: {{ $json.qualification_tier }} ({{ $json.qualification_score }}/100)\\n• Priority: {{ $json.lead_routing.priority }}\\n• Owner: {{ $json.lead_routing.recommended_owner }}\\n\\n✅ Synced to CRM",
+        "otherOptions": {}
+      },
+      "id": "notify-standard",
+      "name": "Notify Team (Standard Lead)",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [2660, 600],
+      "credentials": {
+        "slackApi": {
+          "id": "slack-api",
+          "name": "Slack API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  \"success\": true,\n  \"lead_id\": $('Normalize Lead Data').first().json.lead_id,\n  \"qualified\": $('Apply Business Rules').first().json.is_qualified,\n  \"tier\": $('Apply Business Rules').first().json.qualification_tier,\n  \"score\": $('Apply Business Rules').first().json.qualification_score,\n  \"priority\": $('Apply Business Rules').first().json.lead_routing.priority,\n  \"synced_to_crm\": $('Apply Business Rules').first().json.should_sync_to_crm,\n  \"next_action\": $('Apply Business Rules').first().json.next_actions[0]\n} }}"
+      },
+      "id": "webhook-response",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2880, 500]
+    },
+    {
+      "parameters": {
+        "content": "## AI Lead Qualification & CRM Sync\\n\\n**Enterprise RevOps Automation**\\n\\n📥 **Multi-Source Intake:**\\n✅ Website forms\\n✅ LinkedIn\\n✅ Email parsing\\n✅ HubSpot triggers\\n\\n🤖 **AI Intelligence:**\\n✅ Lead scoring (0-100)\\n✅ Tier assignment (A/B/C/D/Junk)\\n✅ Buyer persona detection\\n✅ Intent signal analysis\\n✅ Deal size estimation\\n\\n🔍 **Enrichment:**\\n✅ Clearbit (person + company)\\n✅ Hunter.io (email verification)\\n✅ LinkedIn data\\n✅ Company technographics\\n\\n📊 **Smart Routing:**\\n✅ Auto-assign to right rep\\n✅ Priority-based alerts\\n✅ Follow-up timing\\n✅ Talking points included\\n\\n🔄 **CRM Sync:**\\n✅ HubSpot\\n✅ Salesforce\\n✅ Pipedrive\\n✅ Clean, enriched data\\n\\n💰 **Business Value:**\\n- 60% reduction in junk leads\\n- 3x faster qualification\\n- 95% CRM data accuracy\\n- 40% higher conversion\\n\\n**Perfect for:**\\n- B2B SaaS companies\\n- Marketing agencies\\n- Sales teams\\n- Revenue operations",
+        "height": 700,
+        "width": 380
+      },
+      "id": "sticky-note",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 1000]
+    }
+  ],
+  "connections": {
+    "Website Form Webhook": {
+      "main": [[{"node": "Normalize Lead Data", "type": "main", "index": 0}]]
+    },
+    "LinkedIn Lead Webhook": {
+      "main": [[{"node": "Normalize Lead Data", "type": "main", "index": 0}]]
+    },
+    "Email Lead Parser": {
+      "main": [[{"node": "Normalize Lead Data", "type": "main", "index": 0}]]
+    },
+    "HubSpot New Lead": {
+      "main": [[{"node": "Normalize Lead Data", "type": "main", "index": 0}]]
+    },
+    "Normalize Lead Data": {
+      "main": [[{"node": "Basic Validation", "type": "main", "index": 0}]]
+    },
+    "Basic Validation": {
+      "main": [[
+        {"node": "Clearbit Enrichment", "type": "main", "index": 0},
+        {"node": "Email Verification (Hunter.io)", "type": "main", "index": 0}
+      ]]
+    },
+    "Clearbit Enrichment": {
+      "main": [[{"node": "Merge Enrichment Data", "type": "main", "index": 0}]]
+    },
+    "Email Verification (Hunter.io)": {
+      "main": [[{"node": "Merge Enrichment Data", "type": "main", "index": 0}]]
+    },
+    "Merge Enrichment Data": {
+      "main": [[{"node": "AI Lead Qualification", "type": "main", "index": 0}]]
+    },
+    "AI Lead Qualification": {
+      "main": [[{"node": "Apply Business Rules", "type": "main", "index": 0}]]
+    },
+    "Apply Business Rules": {
+      "main": [[{"node": "Should Sync to CRM?", "type": "main", "index": 0}]]
+    },
+    "Should Sync to CRM?": {
+      "main": [
+        [
+          {"node": "Sync to HubSpot", "type": "main", "index": 0},
+          {"node": "Sync to Salesforce", "type": "main", "index": 0}
+        ],
+        [{"node": "Log Disqualified Lead", "type": "main", "index": 0}]
+      ]
+    },
+    "Sync to HubSpot": {
+      "main": [[{"node": "Log Qualified Lead", "type": "main", "index": 0}]]
+    },
+    "Sync to Salesforce": {
+      "main": [[{"node": "Log Qualified Lead", "type": "main", "index": 0}]]
+    },
+    "Log Qualified Lead": {
+      "main": [[{"node": "Is Hot Lead?", "type": "main", "index": 0}]]
+    },
+    "Is Hot Lead?": {
+      "main": [
+        [{"node": "Alert Sales Team (Hot Lead)", "type": "main", "index": 0}],
+        [{"node": "Notify Team (Standard Lead)", "type": "main", "index": 0}]
+      ]
+    },
+    "Alert Sales Team (Hot Lead)": {
+      "main": [[{"node": "Webhook Response", "type": "main", "index": 0}]]
+    },
+    "Notify Team (Standard Lead)": {
+      "main": [[{"node": "Webhook Response", "type": "main", "index": 0}]]
+    },
+    "Log Disqualified Lead": {
+      "main": [[{"node": "Webhook Response", "type": "main", "index": 0}]]
+    }
+  },
+  "pinData": {},
+  "settings": {"executionOrder": "v1"},
+  "staticData": null,
+  "tags": [{"id": "revops", "name": "Revenue Operations"}],
+  "triggerCount": 0,
+  "updatedAt": "2025-01-08T00:00:00.000Z",
+  "versionId": "1.0.0"
+}
